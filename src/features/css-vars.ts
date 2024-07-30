@@ -1,18 +1,24 @@
-import CssMedia from "./css-media";
+import { CssMedia } from "@/features/css-media";
 
 const DEFAULT_VARIABLE_VALUE = 0;
 
-export default function CssVars() {
-  this.global = {};
-  this.data = {};
+export class CssVars {
+  private global = {};
+  private data = {};
 
-  const media = new CssMedia();
+  private media = new CssMedia();
 
-  this.setGlobal = (declarations, { width, height } = {}) => {
+  setGlobal = (
+    declarations: any,
+    { width, height }: { width: number; height: number },
+  ) => {
     for (const property in declarations) {
       const value = declarations[property];
 
-      const [isMedia, matchedMedia] = media.match(property, { width, height });
+      const [isMedia, matchedMedia] = this.media.match(property, {
+        width,
+        height,
+      });
       if (isMedia) {
         if (matchedMedia) {
           this.setGlobal(value);
@@ -27,11 +33,11 @@ export default function CssVars() {
     }
   };
 
-  this.getGlobal = () => {
+  getGlobal = () => {
     return this.global;
   };
 
-  this.set = (selector, declarations, { width, height } = {}) => {
+  set = (selector, declarations, { width, height } = {}) => {
     for (const property in declarations) {
       const value = declarations[property];
 
@@ -51,18 +57,18 @@ export default function CssVars() {
     }
   };
 
-  this.get = (selector) => {
+  get = (selector) => {
     return {
       ...this.global,
       ...(this.data[selector] || {}),
     };
   };
 
-  this.isVar = (property) => {
+  isVar = (property) => {
     return /^--\w+/.test(property);
   };
 
-  this.injectVar = (selector, value) => {
+  injectVar = (selector, value) => {
     if (value === undefined) return value;
 
     const variables = this.get(selector);
@@ -70,6 +76,4 @@ export default function CssVars() {
       return variables[variableName] || DEFAULT_VARIABLE_VALUE;
     });
   };
-
-  return this;
 }

@@ -1,36 +1,38 @@
-import { camelize } from "../utils/helper";
-import CssVars from "./css-vars";
+import { camelize } from "@/utils/helper";
+import { CssVars } from "@/features/css-vars";
 
 const SUPPORTED_RULE_TYPES = ["rule", "media"];
 
-export default function Stylesheet() {
-  this.stylesheet = {};
+export class Stylesheet {
+  stylesheet: Record<string, any> = {};
 
-  const vars = new CssVars();
+  private vars = new CssVars();
 
-  const _getSelectorName = (selector) => {
+  private _getSelectorName = (selector: string) => {
     if (selector === ":root") return selector;
     return selector.replace(/^\./, "").replace(/\\/g, ""); // remove escape backslash
   };
 
-  this.isRuleTypeSupported = (type) => {
+  isRuleTypeSupported = (type?: string) => {
+    if (!type) return false;
     if (SUPPORTED_RULE_TYPES.includes(type)) return true;
     return false;
   };
 
-  this.isSelectorSupported = (selector) => {
+  isSelectorSupported = (selector?: string) => {
+    if (!selector) return false;
     if (selector === ":root") return true;
     if (selector.includes(" ")) return false;
     if (!selector.startsWith(".")) return false;
     return true;
   };
 
-  this.simplifyDeclarations = (declarations) => {
+  simplifyDeclarations = (declarations?: any[]) => {
     return (declarations || []).reduce((res, declaration) => {
       if (declaration.type !== "declaration") return res;
 
       const { property, value } = declaration;
-      if (vars.isVar(property)) {
+      if (this.vars.isVar(property)) {
         res[property] = value;
       } else {
         res[camelize(property)] = value;
@@ -40,17 +42,15 @@ export default function Stylesheet() {
     }, {});
   };
 
-  this.upsert = (selector, declarations) => {
-    const selectorName = _getSelectorName(selector);
+  upsert = (selector: string, declarations: any) => {
+    const selectorName = this._getSelectorName(selector);
     this.stylesheet[selectorName] = {
       ...this.stylesheet[selectorName],
       ...declarations,
     };
   };
 
-  this.toJSON = () => {
+  toJSON = () => {
     return JSON.stringify(this.stylesheet);
   };
-
-  return this;
 }

@@ -1,8 +1,8 @@
 const UNSUPPORTED_PROPERTIES = ["outline"];
 const remOrEmUnitRe = /([\d.]+)(?:rem|em)$/g;
 
-export default function CssTransform() {
-  this.transformUnsafeValue = (property, value) => {
+export class CssTransform {
+  transformUnsafeValue = (property: string, value?: string | number) => {
     if (!this.isPropertySupported(property, value)) {
       console.info("UNSUPPORTED", property, value);
       return [];
@@ -18,14 +18,14 @@ export default function CssTransform() {
     return [property, value];
   };
 
-  this.transformUnsupportedUnit = (value) => {
+  transformUnsupportedUnit = (value) => {
     if (value === undefined) return value;
     return value.replace(remOrEmUnitRe, (_, rem) => {
       return rem * 16;
     });
   };
 
-  this.transformViewportUnit = (value, { width, height } = {}) => {
+  transformViewportUnit = (value, { width, height } = {}) => {
     if (value === undefined) return value;
     if (!width || !height) return value;
 
@@ -39,38 +39,46 @@ export default function CssTransform() {
     });
   };
 
-  this.removeUnit = (value) => {
+  removeUnit = (value) => {
     if (value === undefined) return value;
     return value.replace(/px/g, "");
   };
 
-  this.isPropertySupported = (property, value) => {
+  isPropertySupported = (property: string, value?: string | number) => {
     if (UNSUPPORTED_PROPERTIES.includes(property)) return false;
     if (value === undefined) return false;
     if (!["number", "string"].includes(typeof value)) return false;
     return true;
   };
 
-  this.transformImportant = (property, value) => {
+  transformImportant = (property, value) => {
     return value.replace(/!important/g, "");
   };
 
-  this.transformPosition = (property, value) => {
+  transformPosition = (property, value) => {
     if (property === "position" && value === "fixed") {
       return "absolute";
     }
     return value;
   };
 
-  this.transformBorderRadius = (property, value) => {
+  transformBorderRadius = (property, value) => {
     if (property === "borderRadius" && value.includes("%")) {
       return 9999;
     }
     return value;
   };
 
-  this.transform = (property, value) => {
-    if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
+  transform = (property, value) => {
+    if (
+      [
+        "border",
+        "borderTop",
+        "borderBottom",
+        "borderLeft",
+        "borderRight",
+      ].includes(property)
+    ) {
       return this.transformBorder(property, value);
     }
 
@@ -93,7 +101,7 @@ export default function CssTransform() {
     return { [property]: isNaN(value) ? value : Number(value) };
   };
 
-  this.transformBorder = (property, value) => {
+  transformBorder = (property, value) => {
     if (value === "none") {
       return { [`${property}Width`]: 0 };
     }
@@ -120,7 +128,7 @@ export default function CssTransform() {
     return transformed;
   };
 
-  this.transformSpacing = (property, value) => {
+  transformSpacing = (property, value) => {
     const spacingRe = /\s*(\S+)(?:\s*(\S+)(?:\s*(\S+)(?:\s*(\S+))?)?)?\s*/g;
     const [, top, right, bottom, left] = spacingRe.exec(value) || [];
 
@@ -145,19 +153,23 @@ export default function CssTransform() {
     } else if (!left) {
       transformed[`${property}Top`] = isNaN(top) ? top : Number(top);
       transformed[`${property}Right`] = isNaN(right) ? right : Number(right);
-      transformed[`${property}Bottom`] = isNaN(bottom) ? bottom : Number(bottom);
+      transformed[`${property}Bottom`] = isNaN(bottom)
+        ? bottom
+        : Number(bottom);
       transformed[`${property}Left`] = isNaN(right) ? right : Number(right);
     } else {
       transformed[`${property}Top`] = isNaN(top) ? top : Number(top);
       transformed[`${property}Right`] = isNaN(right) ? right : Number(right);
-      transformed[`${property}Bottom`] = isNaN(bottom) ? bottom : Number(bottom);
+      transformed[`${property}Bottom`] = isNaN(bottom)
+        ? bottom
+        : Number(bottom);
       transformed[`${property}Left`] = isNaN(left) ? left : Number(left);
     }
 
     return transformed;
   };
 
-  this.transformFontWeight = (property, value) => {
+  transformFontWeight = (property, value) => {
     const fontWeightRe = /(normal|bold|100|200|300|400|500|600|700|800|900)/g;
 
     if (!fontWeightRe.test(value)) return;
@@ -166,7 +178,7 @@ export default function CssTransform() {
     };
   };
 
-  this.transformTransform = (property, value) => {
+  transformTransform = (property, value) => {
     const transformRe =
       /(perspective|rotate|rotateX|rotateY|scale|scaleX|scaleY|translate|translateX|translateY|skew|skewX|skewY)\s*\(\s*([^,)]+)[,\s]*([^)]+)?\)/g;
 
@@ -191,10 +203,8 @@ export default function CssTransform() {
     };
   };
 
-  this.getAliasedPropertyName = (property) => {
+  getAliasedPropertyName = (property) => {
     if (property === "background") property = "backgroundColor";
     return property;
   };
-
-  return this;
 }

@@ -1,8 +1,11 @@
-import { Dimensions, Appearance } from "react-native";
-import CssCalc from "./features/css-calc";
-import CssMedia from "./features/css-media";
-import CssTransform from "./features/css-transform";
-import CssVars from "./features/css-vars";
+import { CssCalc } from "@/features/css-calc";
+import { CssMedia } from "@/features/css-media";
+import { CssTransform } from "@/features/css-transform";
+import { CssVars } from "@/features/css-vars";
+
+const { Dimensions, Appearance } = (() => {
+  return require("react-native");
+})();
 
 const INHERIT_PROPERTIES = [
   "color",
@@ -17,7 +20,7 @@ const INHERIT_PROPERTIES = [
   "textTransform",
 ];
 
-function getFlattenStyle(declarations) {
+function getFlattenStyle(declarations: any) {
   if (!Array.isArray(declarations)) {
     return declarations;
   }
@@ -31,10 +34,13 @@ function getFlattenStyle(declarations) {
     }
   }, []);
 
-  return flattenDeclarations.reduce((acc, obj) => Object.assign(acc, obj), {});
+  return flattenDeclarations.reduce(
+    (acc: any, obj: any) => Object.assign(acc, obj),
+    {} as Record<string, unknown>,
+  );
 }
 
-function transform(stylesheet, classNames) {
+function transform(stylesheet: any, classNames?: string) {
   if (!stylesheet || !classNames) return;
 
   const transformedDeclarations = classNames.split(" ").map((className) => {
@@ -57,7 +63,7 @@ function transform(stylesheet, classNames) {
       vars.set(className, declaration, { width, height });
     }
 
-    const transformStylesheet = (currentSelector, declaration) => {
+    const transformStylesheet = (currentSelector: string, declaration: any) => {
       let results = {};
 
       for (let property in declaration) {
@@ -66,7 +72,11 @@ function transform(stylesheet, classNames) {
         let value = declaration[property];
         let transformed;
 
-        const [isMedia, matchedMedia] = media.match(property, { width, height, colorScheme });
+        const [isMedia, matchedMedia] = media.match(property, {
+          width,
+          height,
+          colorScheme,
+        });
         if (isMedia) {
           if (matchedMedia) {
             vars.set(property, value);
@@ -105,20 +115,26 @@ function transform(stylesheet, classNames) {
   return getFlattenStyle(transformedDeclarations);
 }
 
-function getInheritStyle(declarations) {
+function getInheritStyle(declarations: any) {
   if (!declarations) return;
 
-  const inheritDeclarations = Object.entries(declarations).reduce((res, [key, value]) => {
-    if (INHERIT_PROPERTIES.includes(key)) {
-      res[key] = value;
-    }
-    return res;
-  }, {});
+  const inheritDeclarations = Object.entries(declarations).reduce(
+    (res, [key, value]) => {
+      if (INHERIT_PROPERTIES.includes(key)) {
+        res[key] = value;
+      }
+      return res;
+    },
+    {} as Record<string, unknown>,
+  );
 
   return inheritDeclarations;
 }
 
-function getStyle(stylesheet, [inheritStyle, className, style]) {
+function getStyle(
+  stylesheet: Record<string, unknown>,
+  [inheritStyle, className, style]: any,
+) {
   return getFlattenStyle([
     getInheritStyle(getFlattenStyle(inheritStyle)),
     transform(stylesheet, className),

@@ -1,5 +1,5 @@
-import { camelize } from "../utils/helper";
-import CssTransform from "./css-transform";
+import { camelize } from "@/utils/helper";
+import { CssTransform } from "@/features/css-transform";
 
 const SUPPORTED_MEDIA_TYPE = [
   "min-width",
@@ -9,10 +9,10 @@ const SUPPORTED_MEDIA_TYPE = [
   "prefers-color-scheme",
 ];
 
-export default function CssMedia() {
-  const transform = new CssTransform();
+export class CssMedia {
+  transform = new CssTransform();
 
-  this.match = (media, { width, height, colorScheme } = {}) => {
+  match = (media, { width, height, colorScheme } = {}) => {
     const isMedia = media.startsWith("@media");
     if (!isMedia) return [false];
 
@@ -33,7 +33,10 @@ export default function CssMedia() {
       mediaType = camelize(mediaType);
 
       mediaValue = transform.transformUnsupportedUnit(mediaValue);
-      mediaValue = transform.transformViewportUnit(mediaValue, { width, height });
+      mediaValue = transform.transformViewportUnit(mediaValue, {
+        width,
+        height,
+      });
       mediaValue = transform.removeUnit(mediaValue);
 
       if (mediaType === "minWidth") {
@@ -53,7 +56,10 @@ export default function CssMedia() {
     }
     if (!isValidMedia) return [true, false];
 
-    if (mediaGroups[0][0] === "prefersColorScheme" && mediaGroups[0][1] === "dark") {
+    if (
+      mediaGroups[0][0] === "prefersColorScheme" &&
+      mediaGroups[0][1] === "dark"
+    ) {
       if (colorScheme === "dark") {
         return [true, true];
       } else {
@@ -61,7 +67,8 @@ export default function CssMedia() {
       }
     }
 
-    const isValidRange = widthRange[0] <= widthRange[1] && heightRange[0] <= heightRange[1];
+    const isValidRange =
+      widthRange[0] <= widthRange[1] && heightRange[0] <= heightRange[1];
     if (!isValidRange) return [true, false];
 
     const isMatchedMedia =
@@ -73,6 +80,4 @@ export default function CssMedia() {
 
     return [true, true];
   };
-
-  return this;
 }
