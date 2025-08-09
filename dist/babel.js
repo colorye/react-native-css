@@ -5,13 +5,9 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports["default"] = _default;
 var _path = _interopRequireDefault(require("path"));
-var _generator = _interopRequireDefault(require("@babel/generator"));
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+var _babel = require("./utils/babel.js");
+function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 var libRoot = _path["default"].dirname(__filename);
-function isRequire(node) {
-  var _node$declarations;
-  return (node === null || node === void 0 || (_node$declarations = node.declarations) === null || _node$declarations === void 0 || (_node$declarations = _node$declarations[0]) === null || _node$declarations === void 0 || (_node$declarations = _node$declarations.init) === null || _node$declarations === void 0 || (_node$declarations = _node$declarations.callee) === null || _node$declarations === void 0 ? void 0 : _node$declarations.name) === "require";
-}
 function _default(_ref) {
   var t = _ref.types;
   return {
@@ -29,6 +25,9 @@ function _default(_ref) {
             excludes: this.opts.excludes || [],
             css: this.opts.css
           };
+
+          // Normalize filename to use forward slashes for consistent regex matching across platforms
+          var normalizedFilename = filename.replace(/\\/g, "/");
           var regex = options.paths.map(function (p) {
             return new RegExp(p);
           });
@@ -36,9 +35,9 @@ function _default(_ref) {
             return new RegExp(p);
           });
           if (!regex.some(function (re) {
-            return filename.match(re);
+            return normalizedFilename.match(re) || filename.match(re);
           }) || excludesRegex.some(function (re) {
-            return filename.match(re);
+            return normalizedFilename.match(re) || filename.match(re);
           })) {
             return;
           }
@@ -47,50 +46,46 @@ function _default(_ref) {
           state.stylesheet = t.variableDeclaration("var", [t.variableDeclarator(state.stylesheetId, t.callExpression(t.identifier("require"), [t.stringLiteral(options.css)]))]);
           state.getStyleId = path.scope.generateUidIdentifier();
           state.getStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getStyle")))]);
+          state.getInheritStyleId = path.scope.generateUidIdentifier();
+          state.getInheritStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getInheritStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getInheritStyle")))]);
         },
         exit: function exit(path, state) {
           if (!state.enabled) return;
-          if (!state.cssTransformed) return;
           var lastImport = path.get("body").filter(function (p) {
-            return p.isImportDeclaration() || isRequire(p.node);
+            return (0, _babel.isImportOrRequire)(p);
           }).pop();
-          [state.stylesheet, state.getStyle].reverse().forEach(function (node) {
+          [state.stylesheet, state.getStyle, state.getInheritStyle].reverse().forEach(function (node) {
             return lastImport ? lastImport.insertAfter(node) : path.unshiftContainer("body", node);
           });
         }
       },
       JSXElement: function JSXElement(path, state) {
         if (!state.enabled) return;
+        if ((0, _babel.isFragmentElement)(t, path.node.openingElement.name)) return;
         var openingElement = path.node.openingElement;
-        var propInheritStyle = t.logicalExpression("&&", t.memberExpression(t.identifier("arguments"), t.numericLiteral(0), true), t.memberExpression(t.memberExpression(t.identifier("arguments"), t.numericLiteral(0), true), t.identifier("inheritStyle")));
-        var inheritStyle = openingElement.attributes.find(function (attr) {
-          var _attr$name;
-          return ((_attr$name = attr.name) === null || _attr$name === void 0 ? void 0 : _attr$name.name) === "inheritStyle";
-        });
-        var className = openingElement.attributes.find(function (attr) {
-          var _attr$name2;
-          return ((_attr$name2 = attr.name) === null || _attr$name2 === void 0 ? void 0 : _attr$name2.name) === "className";
-        });
+
+        // inject style attribute
         var style = openingElement.attributes.find(function (attr) {
-          var _attr$name3;
-          return ((_attr$name3 = attr.name) === null || _attr$name3 === void 0 ? void 0 : _attr$name3.name) === "style";
+          var _attr$name;
+          return ((_attr$name = attr.name) === null || _attr$name === void 0 ? void 0 : _attr$name.name) === "style";
         });
-        if (!inheritStyle && !className && !style) return;
-        state.cssTransformed = true;
-
-        // compute style and inheritStyle
-        var styleExpressions = t.callExpression(state.getStyleId, [state.stylesheetId, t.arrayExpression([t.arrayExpression([propInheritStyle, inheritStyle && inheritStyle.value.expression || null]), className && (t.isStringLiteral(className.value) ? t.stringLiteral(className.value.value) : className.value.expression) || null, style && style.value.expression || null])]);
-
-        // inject style and inheritStyle attributes
+        var styleExpressions = (0, _babel.getStyleExpression)(path, state, t);
         if (style) {
-          style.value = styleExpressions;
+          style.value = t.jsxExpressionContainer(styleExpressions);
         } else {
           openingElement.attributes.push(t.jsxAttribute(t.jsxIdentifier("style"), t.jsxExpressionContainer(styleExpressions)));
         }
+
+        // inject inheritStyle attribute
+        var inheritStyle = openingElement.attributes.find(function (attr) {
+          var _attr$name2;
+          return ((_attr$name2 = attr.name) === null || _attr$name2 === void 0 ? void 0 : _attr$name2.name) === "inheritStyle";
+        });
+        var inheritStyleExpressions = t.callExpression(state.getInheritStyleId, [styleExpressions]);
         if (inheritStyle) {
-          inheritStyle.value = styleExpressions;
+          inheritStyle.value = t.jsxExpressionContainer(inheritStyleExpressions);
         } else {
-          openingElement.attributes.push(t.jsxAttribute(t.jsxIdentifier("inheritStyle"), t.jsxExpressionContainer(styleExpressions)));
+          openingElement.attributes.push(t.jsxAttribute(t.jsxIdentifier("inheritStyle"), t.jsxExpressionContainer(inheritStyleExpressions)));
         }
 
         // remove className attribute
@@ -105,7 +100,23 @@ function _default(_ref) {
         path.traverse({
           JSXElement: function JSXElement(childPath) {
             var childOpeningElement = childPath.node.openingElement;
-            childOpeningElement.attributes.push(t.jsxAttribute(t.jsxIdentifier("inheritStyle"), t.jsxExpressionContainer(styleExpressions)));
+
+            // TODO: what if there are multiple direct children?
+
+            // TODO: go to next child if direct child is a fragment
+            if ((0, _babel.isFragmentElement)(t, childOpeningElement.name)) {
+              childPath.skip();
+              return;
+            }
+            var inheritStyle = childOpeningElement.attributes.find(function (attr) {
+              var _attr$name3;
+              return ((_attr$name3 = attr.name) === null || _attr$name3 === void 0 ? void 0 : _attr$name3.name) === "inheritStyle";
+            });
+            if (inheritStyle) {
+              inheritStyle.value = t.jsxExpressionContainer(inheritStyleExpressions);
+            } else {
+              childOpeningElement.attributes.push(t.jsxAttribute(t.jsxIdentifier("inheritStyle"), t.jsxExpressionContainer(inheritStyleExpressions)));
+            }
 
             // Skip traversing nested JSXOpeningElement nodes
             childPath.skip();

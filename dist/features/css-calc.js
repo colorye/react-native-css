@@ -4,12 +4,14 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports["default"] = CssCalc;
-var _helper = require("../utils/helper");
 var calcRe = /calc\(([^)]+)\)/g;
 var colorRe1 = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)/g;
 var colorRe2 = /rgba?\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\/\s*([\d.]+)\s*\)/g;
+var itohex = function itohex(component) {
+  var hex = Number(component).toString(16);
+  return hex.length === 1 ? "0".concat(hex) : hex;
+};
 function CssCalc() {
-  // TODO: move to runtime calc
   this.calc = function (value) {
     if (value === undefined) return value;
     return value.replace(calcRe, function (_, calc) {
@@ -27,15 +29,15 @@ function CssCalc() {
     if (value === undefined) return value;
     value = value.replace(colorRe1, function (_, r, g, b, a) {
       a = parseFloat(a);
-      if (isNaN(a) || a >= 1) return "#".concat((0, _helper.itohex)(r)).concat((0, _helper.itohex)(g)).concat((0, _helper.itohex)(b));
+      if (isNaN(a) || a >= 1) return "#".concat(itohex(r)).concat(itohex(g)).concat(itohex(b));
       a = Math.round(a * 255);
-      return "#".concat((0, _helper.itohex)(r)).concat((0, _helper.itohex)(g)).concat((0, _helper.itohex)(b)).concat((0, _helper.itohex)(a));
+      return "#".concat(itohex(r)).concat(itohex(g)).concat(itohex(b)).concat(itohex(a));
     });
     value = value.replace(colorRe2, function (_, r, g, b, a) {
       a = parseFloat(a);
-      if (isNaN(a) || a >= 1) return "#".concat((0, _helper.itohex)(r)).concat((0, _helper.itohex)(g)).concat((0, _helper.itohex)(b));
+      if (isNaN(a) || a >= 1) return "#".concat(itohex(r)).concat(itohex(g)).concat(itohex(b));
       a = Math.round(a * 255);
-      return "#".concat((0, _helper.itohex)(r)).concat((0, _helper.itohex)(g)).concat((0, _helper.itohex)(b)).concat((0, _helper.itohex)(a));
+      return "#".concat(itohex(r)).concat(itohex(g)).concat(itohex(b)).concat(itohex(a));
     });
     return value;
   };

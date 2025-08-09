@@ -66,9 +66,12 @@ export default function CssVars() {
     if (value === undefined) return value;
 
     const variables = this.get(selector);
-    return value.replace(/var\(([^)]+)\)/g, (match, variableName) => {
-      return variables[variableName] || DEFAULT_VARIABLE_VALUE;
-    });
+    return value.replace(
+      /var\((--[^,)]+)(?:,\s*([^)]+))?\)/g,
+      function (match, variableName, defaultValue) {
+        return variables[variableName] || defaultValue || DEFAULT_VARIABLE_VALUE;
+      },
+    );
   };
 
   return this;

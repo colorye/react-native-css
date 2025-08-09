@@ -1,12 +1,14 @@
-import { itohex } from "../utils/helper";
-
 const calcRe = /calc\(([^)]+)\)/g;
 
 const colorRe1 = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)/g;
 const colorRe2 = /rgba?\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\/\s*([\d.]+)\s*\)/g;
 
+const itohex = (component) => {
+  const hex = Number(component).toString(16);
+  return hex.length === 1 ? `0${hex}` : hex;
+};
+
 export default function CssCalc() {
-  // TODO: move to runtime calc
   this.calc = (value) => {
     if (value === undefined) return value;
 

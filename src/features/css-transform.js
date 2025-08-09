@@ -69,30 +69,6 @@ export default function CssTransform() {
     return value;
   };
 
-  this.transform = (property, value) => {
-    if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
-      return this.transformBorder(property, value);
-    }
-
-    if (["padding", "margin"].includes(property)) {
-      return this.transformSpacing(property, value);
-    }
-
-    if (["flex"].includes(property)) {
-      return { flex: parseInt(value) };
-    }
-
-    if (["fontWeight"].includes(property)) {
-      return this.transformFontWeight(property, value);
-    }
-
-    if (["transform"].includes(property)) {
-      return this.transformTransform(property, value);
-    }
-
-    return { [property]: isNaN(value) ? value : Number(value) };
-  };
-
   this.transformBorder = (property, value) => {
     if (value === "none") {
       return { [`${property}Width`]: 0 };
@@ -189,6 +165,45 @@ export default function CssTransform() {
     return {
       [property]: transforms,
     };
+  };
+
+  this.transformFontScaling = (property, value, { width, roundFn }) => {
+    if (!["fontSize", "lineHeight"].includes(property)) return value;
+
+    // Base width for design (iPhone 6/7/8)
+    const baseWidth = 375;
+
+    // Calculate scaling factor based on device width
+    const scaleFactor = width ? width / baseWidth : 1;
+    if (!isNaN(value)) {
+      return roundFn(Number(value) * scaleFactor);
+    }
+
+    return value;
+  };
+
+  this.transform = (property, value, { width, height }) => {
+    if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
+      return this.transformBorder(property, value);
+    }
+
+    if (["padding", "margin"].includes(property)) {
+      return this.transformSpacing(property, value);
+    }
+
+    if (["flex"].includes(property)) {
+      return { flex: parseInt(value) };
+    }
+
+    if (["fontWeight"].includes(property)) {
+      return this.transformFontWeight(property, value);
+    }
+
+    if (["transform"].includes(property)) {
+      return this.transformTransform(property, value);
+    }
+
+    return { [property]: isNaN(value) ? value : Number(value) };
   };
 
   this.getAliasedPropertyName = (property) => {

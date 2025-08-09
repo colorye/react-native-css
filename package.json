@@ -4,17 +4,17 @@
   "author": "Rye Nguyen <ryenguyen7411@gmail.com>",
   "license": "MIT",
   "main": "./dist/index.js",
-  "exports": {
-    ".": "./dist/index.js",
-    "./babel": "./dist/babel.js"
-  },
   "scripts": {
     "build": "rm -rf ./dist && npx babel ./src -d ./dist --copy-files"
   },
   "devDependencies": {
-    "@babel/cli": "^7.24.8",
-    "@babel/core": "^7.24.9",
+    "@babel/cli": "^7.22.9",
+    "@babel/core": "^7.22.9",
     "@babel/generator": "^7.25.0",
-    "@babel/preset-env": "^7.25.0"
+    "@babel/preset-env": "^7.22.9"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./babel": "./dist/babel.js"
   }
 }
