@@ -99,5 +99,5 @@ function getStyleExpression(path, state, t) {
   });
 
   // compute style and inheritStyle
-  return t.callExpression(state.getStyleId, [state.stylesheetId, t.arrayExpression([t.arrayExpression([propInheritStyle || null, inheritStyle && inheritStyle.value.expression || null]), className && (t.isStringLiteral(className.value) ? t.stringLiteral(className.value.value) : className.value.expression) || null, style && style.value.expression || null, t.isJSXIdentifier(elementName) ? t.stringLiteral(elementName.name) : t.isJSXMemberExpression(elementName) ? t.stringLiteral("".concat(elementName.object.name, ".").concat(elementName.property.name)) : t.stringLiteral("Unknown")])]);
+  return t.callExpression(state.getStyleId, [state.stylesheetId, t.arrayExpression([t.arrayExpression([propInheritStyle || null, inheritStyle && inheritStyle.value && inheritStyle.value.expression || null]), className && (t.isStringLiteral(className.value) ? t.stringLiteral(className.value.value) : className.value.expression) || null, style && style.value.expression || null, t.isJSXIdentifier(elementName) ? t.stringLiteral(elementName.name) : t.isJSXMemberExpression(elementName) ? t.stringLiteral("".concat(elementName.object.name, ".").concat(elementName.property.name)) : t.stringLiteral("Unknown")])]);
 }
