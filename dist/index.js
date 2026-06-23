@@ -5,6 +5,7 @@ var _fs = _interopRequireDefault(require("fs"));
 var _path = _interopRequireDefault(require("path"));
 var _css = require("css");
 var _stylesheet = _interopRequireDefault(require("./features/stylesheet"));
+var _css2 = require("./utils/css");
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
 function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == _typeof(i) ? i : i + ""; }
@@ -24,7 +25,8 @@ var upstreamTransformer = function () {
   }
 }();
 function getStylesheet(css) {
-  var ast = (0, _css.parse)(css);
+  var preprocessedCss = (0, _css2.preprocessTailwindCss)(css);
+  var ast = (0, _css.parse)(preprocessedCss);
   var stylesheet = new _stylesheet["default"]();
   var _iterator = _createForOfIteratorHelper(ast.stylesheet.rules || []),
     _step;

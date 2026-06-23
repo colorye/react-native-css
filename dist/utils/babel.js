@@ -14,7 +14,7 @@ function isFragmentElement(t, elementName) {
   return t.isJSXIdentifier(elementName) && (elementName.name === "Fragment" || elementName.name === "React.Fragment") || t.isJSXMemberExpression(elementName) && elementName.object.name === "React" && elementName.property.name === "Fragment" || t.isJSXIdentifier(elementName, {
     name: ""
   }) // JSX shorthand fragment
-  ;
+;
 }
 
 // Memoization map for inherit style expressions per function node

@@ -66,12 +66,27 @@ export default function CssVars() {
     if (value === undefined) return value;
 
     const variables = this.get(selector);
-    return value.replace(
-      /var\((--[^,)]+)(?:,\s*([^)]+))?\)/g,
-      function (match, variableName, defaultValue) {
-        return variables[variableName] || defaultValue || DEFAULT_VARIABLE_VALUE;
-      },
-    );
+    const resolve = (val, seen = new Set()) => {
+      if (typeof val !== "string") return val;
+
+      return val.replace(
+        /var\((--[^,)]+)(?:,\s*([^)]+))?\)/g,
+        function (match, variableName, defaultValue) {
+          if (seen.has(variableName)) {
+            return defaultValue || DEFAULT_VARIABLE_VALUE;
+          }
+          seen.add(variableName);
+          const resolvedVal = variables[variableName];
+          if (resolvedVal === undefined) {
+            return defaultValue || DEFAULT_VARIABLE_VALUE;
+          }
+          return resolve(resolvedVal, seen);
+        },
+      );
+    };
+
+    const resolved = resolve(value);
+    return resolved;
   };
 
   return this;

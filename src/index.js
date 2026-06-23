@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { parse as cssParse } from "css";
 import Stylesheet from "./features/stylesheet";
+import { preprocessTailwindCss } from "./utils/css";
 
 const upstreamTransformer = (() => {
   try {
@@ -16,7 +17,8 @@ const upstreamTransformer = (() => {
 })();
 
 function getStylesheet(css) {
-  const ast = cssParse(css);
+  const preprocessedCss = preprocessTailwindCss(css);
+  const ast = cssParse(preprocessedCss);
 
   const stylesheet = new Stylesheet();
 
@@ -39,11 +41,15 @@ function getStylesheet(css) {
       for (const mediaRule of rule.rules || []) {
         if (!stylesheet.isRuleTypeSupported(mediaRule.type)) continue;
         if (mediaRule.type === "rule") {
-          const declarations = stylesheet.simplifyDeclarations(mediaRule.declarations);
+          const declarations = stylesheet.simplifyDeclarations(
+            mediaRule.declarations,
+          );
 
           mediaRule.selectors.forEach((selector) => {
             if (!stylesheet.isSelectorSupported(selector)) return;
-            stylesheet.upsert(selector, { [`@media ${rule.media}`]: declarations });
+            stylesheet.upsert(selector, {
+              [`@media ${rule.media}`]: declarations,
+            });
           });
         }
       }
@@ -60,7 +66,9 @@ function getStylesheet(css) {
 function debugStylesheets(content) {
   try {
     const dir = path.join(__dirname);
-    fs.writeFileSync(`${dir}/exported-stylesheet.json`, content, { mode: 0o755 });
+    fs.writeFileSync(`${dir}/exported-stylesheet.json`, content, {
+      mode: 0o755,
+    });
   } catch {}
 }
 
