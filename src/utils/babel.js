@@ -114,7 +114,7 @@ export function getStyleExpression(path, state, t) {
     t.arrayExpression([
       t.arrayExpression([
         propInheritStyle || null,
-        (inheritStyle && inheritStyle.value.expression) || null,
+        (inheritStyle && inheritStyle.value && inheritStyle.value.expression) || null,
       ]),
       (className &&
         (t.isStringLiteral(className.value)

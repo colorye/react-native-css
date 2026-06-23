@@ -180,9 +180,9 @@ function CssTransform() {
     }
     return value;
   };
-  this.transform = function (property, value, _ref10) {
-    var width = _ref10.width,
-      height = _ref10.height;
+  this.transform = function (property, value, _ref0) {
+    var width = _ref0.width,
+      height = _ref0.height;
     if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
       return _this.transformBorder(property, value);
     }

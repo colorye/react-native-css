@@ -85,9 +85,23 @@ function CssVars() {
   this.injectVar = function (selector, value) {
     if (value === undefined) return value;
     var variables = _this.get(selector);
-    return value.replace(/var\((--[^,)]+)(?:,\s*([^)]+))?\)/g, function (match, variableName, defaultValue) {
-      return variables[variableName] || defaultValue || DEFAULT_VARIABLE_VALUE;
-    });
+    var _resolve = function resolve(val) {
+      var seen = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : new Set();
+      if (typeof val !== "string") return val;
+      return val.replace(/var\((--[^,)]+)(?:,\s*([^)]+))?\)/g, function (match, variableName, defaultValue) {
+        if (seen.has(variableName)) {
+          return defaultValue || DEFAULT_VARIABLE_VALUE;
+        }
+        seen.add(variableName);
+        var resolvedVal = variables[variableName];
+        if (resolvedVal === undefined) {
+          return defaultValue || DEFAULT_VARIABLE_VALUE;
+        }
+        return _resolve(resolvedVal, seen);
+      });
+    };
+    var resolved = _resolve(value);
+    return resolved;
   };
   return this;
 }
