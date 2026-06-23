@@ -15,7 +15,7 @@ function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" 
 function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != _typeof(i)) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
 function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
 var UNSUPPORTED_PROPERTIES = ["outline"];
-var remOrEmUnitRe = /([\d.]+)(?:rem|em)$/g;
+var remOrEmUnitRe = /([\d.]+)(?:rem|em)\b/g;
 function CssTransform() {
   var _this = this;
   this.transformUnsafeValue = function (property, value) {
@@ -23,15 +23,18 @@ function CssTransform() {
       console.info("UNSUPPORTED", property, value);
       return [];
     }
-    value = value.trim();
-    value = _this.transformImportant(property, value);
+    if (typeof value === "string") {
+      value = value.trim();
+      value = _this.transformImportant(property, value);
+    }
     value = _this.transformPosition(property, value);
     value = _this.transformBorderRadius(property, value);
     property = _this.getAliasedPropertyName(property);
     return [property, value];
   };
   this.transformUnsupportedUnit = function (value) {
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
+    remOrEmUnitRe.lastIndex = 0;
     return value.replace(remOrEmUnitRe, function (_, rem) {
       return rem * 16;
     });
@@ -40,9 +43,9 @@ function CssTransform() {
     var _ref = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {},
       width = _ref.width,
       height = _ref.height;
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
     if (!width || !height) return value;
-    var viewportUnitRe = /^([+-]?[0-9.]+)(vh|vw|vmin|vmax)$/g;
+    var viewportUnitRe = /([+-]?[0-9.]+)(vh|vw|vmin|vmax)\b/g;
     var dimensionsMap = {
       vw: width,
       vh: height
@@ -52,7 +55,7 @@ function CssTransform() {
     });
   };
   this.removeUnit = function (value) {
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
     return value.replace(/px/g, "");
   };
   this.isPropertySupported = function (property, value) {
@@ -62,6 +65,7 @@ function CssTransform() {
     return true;
   };
   this.transformImportant = function (property, value) {
+    if (typeof value !== "string") return value;
     return value.replace(/!important/g, "");
   };
   this.transformPosition = function (property, value) {
@@ -71,7 +75,7 @@ function CssTransform() {
     return value;
   };
   this.transformBorderRadius = function (property, value) {
-    if (property.endsWith("Radius") && typeof value === "string" && value.includes("%")) {
+    if (property.toLowerCase().endsWith("radius") && typeof value === "string" && value.includes("%")) {
       return 9999;
     }
     return value;
@@ -81,7 +85,7 @@ function CssTransform() {
       return _defineProperty({}, "".concat(property, "Width"), 0);
     }
     var borderRe = /(\S+)(?:\s+(solid|dashed|dotted)(?:\s+(\S+))?)?/g;
-    var _ref3 = borderRe.exec(value) || [],
+    var _ref3 = borderRe.exec(String(value)) || [],
       _ref4 = _slicedToArray(_ref3, 4),
       width = _ref4[1],
       style = _ref4[2],
@@ -101,55 +105,85 @@ function CssTransform() {
     return transformed;
   };
   this.transformSpacing = function (property, value) {
-    var spacingRe = /\s*(\S+)(?:\s*(\S+)(?:\s*(\S+)(?:\s*(\S+))?)?)?\s*/g;
-    var _ref5 = spacingRe.exec(value) || [],
-      _ref6 = _slicedToArray(_ref5, 5),
-      top = _ref6[1],
-      right = _ref6[2],
-      bottom = _ref6[3],
-      left = _ref6[4];
+    var strValue = String(value).trim();
+    var parts = [];
+    var current = "";
+    var depth = 0;
+    for (var i = 0; i < strValue.length; i++) {
+      var _char = strValue[i];
+      if (_char === "(") {
+        depth++;
+        current += _char;
+      } else if (_char === ")") {
+        depth--;
+        current += _char;
+      } else if (_char === " " && depth === 0) {
+        if (current) {
+          parts.push(current);
+          current = "";
+        }
+      } else {
+        current += _char;
+      }
+    }
+    if (current) {
+      parts.push(current);
+    }
+    var cleanedParts = parts.filter(Boolean);
+    var toNumberOrString = function toNumberOrString(val) {
+      return isNaN(val) ? val : Number(val);
+    };
     var transformed = {};
-
-    // marginHorizontal not support auto
-    if (!top) {
+    if (cleanedParts.length === 0) {
       transformed["".concat(property, "Top")] = 0;
       transformed["".concat(property, "Right")] = 0;
       transformed["".concat(property, "Bottom")] = 0;
       transformed["".concat(property, "Left")] = 0;
-    } else if (!right) {
-      transformed["".concat(property, "Top")] = isNaN(top) ? top : Number(top);
-      transformed["".concat(property, "Right")] = isNaN(top) ? top : Number(top);
-      transformed["".concat(property, "Bottom")] = isNaN(top) ? top : Number(top);
-      transformed["".concat(property, "Left")] = isNaN(top) ? top : Number(top);
-    } else if (!bottom) {
-      transformed["".concat(property, "Top")] = isNaN(top) ? top : Number(top);
-      transformed["".concat(property, "Right")] = isNaN(right) ? right : Number(right);
-      transformed["".concat(property, "Bottom")] = isNaN(top) ? top : Number(top);
-      transformed["".concat(property, "Left")] = isNaN(right) ? right : Number(right);
-    } else if (!left) {
-      transformed["".concat(property, "Top")] = isNaN(top) ? top : Number(top);
-      transformed["".concat(property, "Right")] = isNaN(right) ? right : Number(right);
-      transformed["".concat(property, "Bottom")] = isNaN(bottom) ? bottom : Number(bottom);
-      transformed["".concat(property, "Left")] = isNaN(right) ? right : Number(right);
+    } else if (cleanedParts.length === 1) {
+      var top = cleanedParts[0];
+      transformed["".concat(property, "Top")] = toNumberOrString(top);
+      transformed["".concat(property, "Right")] = toNumberOrString(top);
+      transformed["".concat(property, "Bottom")] = toNumberOrString(top);
+      transformed["".concat(property, "Left")] = toNumberOrString(top);
+    } else if (cleanedParts.length === 2) {
+      var _top = cleanedParts[0];
+      var right = cleanedParts[1];
+      transformed["".concat(property, "Top")] = toNumberOrString(_top);
+      transformed["".concat(property, "Right")] = toNumberOrString(right);
+      transformed["".concat(property, "Bottom")] = toNumberOrString(_top);
+      transformed["".concat(property, "Left")] = toNumberOrString(right);
+    } else if (cleanedParts.length === 3) {
+      var _top2 = cleanedParts[0];
+      var _right = cleanedParts[1];
+      var bottom = cleanedParts[2];
+      transformed["".concat(property, "Top")] = toNumberOrString(_top2);
+      transformed["".concat(property, "Right")] = toNumberOrString(_right);
+      transformed["".concat(property, "Bottom")] = toNumberOrString(bottom);
+      transformed["".concat(property, "Left")] = toNumberOrString(_right);
     } else {
-      transformed["".concat(property, "Top")] = isNaN(top) ? top : Number(top);
-      transformed["".concat(property, "Right")] = isNaN(right) ? right : Number(right);
-      transformed["".concat(property, "Bottom")] = isNaN(bottom) ? bottom : Number(bottom);
-      transformed["".concat(property, "Left")] = isNaN(left) ? left : Number(left);
+      var _top3 = cleanedParts[0];
+      var _right2 = cleanedParts[1];
+      var _bottom = cleanedParts[2];
+      var left = cleanedParts[3];
+      transformed["".concat(property, "Top")] = toNumberOrString(_top3);
+      transformed["".concat(property, "Right")] = toNumberOrString(_right2);
+      transformed["".concat(property, "Bottom")] = toNumberOrString(_bottom);
+      transformed["".concat(property, "Left")] = toNumberOrString(left);
     }
     return transformed;
   };
   this.transformFontWeight = function (property, value) {
     var fontWeightRe = /(normal|bold|100|200|300|400|500|600|700|800|900)/g;
-    if (!fontWeightRe.test(value)) return;
-    return _defineProperty({}, property, value);
+    if (!fontWeightRe.test(String(value))) return;
+    return _defineProperty({}, property, String(value));
   };
   this.transformTransform = function (property, value) {
     var transformRe = /(perspective|rotate|rotateX|rotateY|scale|scaleX|scaleY|translate|translateX|translateY|skew|skewX|skewY)\s*\(\s*([^,)]+)[,\s]*([^)]+)?\)/g;
     var transforms = [];
     var match;
+    var strValue = String(value);
     do {
-      match = transformRe.exec(value);
+      match = transformRe.exec(strValue);
       if (!match) break;
       var _match = match,
         _match2 = _slicedToArray(_match, 4),
@@ -165,9 +199,9 @@ function CssTransform() {
     } while (match);
     return _defineProperty({}, property, transforms);
   };
-  this.transformFontScaling = function (property, value, _ref9) {
-    var width = _ref9.width,
-      roundFn = _ref9.roundFn;
+  this.transformFontScaling = function (property, value, _ref7) {
+    var width = _ref7.width,
+      roundFn = _ref7.roundFn;
     if (!["fontSize", "lineHeight"].includes(property)) return value;
 
     // Base width for design (iPhone 6/7/8)
@@ -180,11 +214,149 @@ function CssTransform() {
     }
     return value;
   };
-  this.transform = function (property, value, _ref0) {
-    var width = _ref0.width,
-      height = _ref0.height;
-    if (property.endsWith("Radius")) {
+  this.transformLogicalProperty = function (property, value) {
+    var strValue = String(value).trim();
+    var parts = [];
+    var current = "";
+    var depth = 0;
+    for (var i = 0; i < strValue.length; i++) {
+      var _char2 = strValue[i];
+      if (_char2 === "(") {
+        depth++;
+        current += _char2;
+      } else if (_char2 === ")") {
+        depth--;
+        current += _char2;
+      } else if (_char2 === " " && depth === 0) {
+        if (current) {
+          parts.push(current);
+          current = "";
+        }
+      } else {
+        current += _char2;
+      }
+    }
+    if (current) {
+      parts.push(current);
+    }
+    var cleanedParts = parts.filter(Boolean);
+    var toNumberOrString = function toNumberOrString(val) {
+      return isNaN(val) ? val : Number(val);
+    };
+    if (property === "paddingInlineStart") return {
+      paddingStart: toNumberOrString(value)
+    };
+    if (property === "paddingInlineEnd") return {
+      paddingEnd: toNumberOrString(value)
+    };
+    if (property === "marginInlineStart") return {
+      marginStart: toNumberOrString(value)
+    };
+    if (property === "marginInlineEnd") return {
+      marginEnd: toNumberOrString(value)
+    };
+    if (property === "insetInlineStart") return {
+      start: toNumberOrString(value)
+    };
+    if (property === "insetInlineEnd") return {
+      end: toNumberOrString(value)
+    };
+    if (property === "insetBlockStart") return {
+      top: toNumberOrString(value)
+    };
+    if (property === "insetBlockEnd") return {
+      bottom: toNumberOrString(value)
+    };
+    if (property === "paddingInline") {
+      if (cleanedParts.length === 1) {
+        return {
+          paddingHorizontal: toNumberOrString(cleanedParts[0])
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          paddingStart: toNumberOrString(cleanedParts[0]),
+          paddingEnd: toNumberOrString(cleanedParts[1])
+        };
+      }
+    }
+    if (property === "marginInline") {
+      if (cleanedParts.length === 1) {
+        return {
+          marginHorizontal: toNumberOrString(cleanedParts[0])
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          marginStart: toNumberOrString(cleanedParts[0]),
+          marginEnd: toNumberOrString(cleanedParts[1])
+        };
+      }
+    }
+    if (property === "paddingBlock") {
+      if (cleanedParts.length === 1) {
+        return {
+          paddingVertical: toNumberOrString(cleanedParts[0])
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          paddingTop: toNumberOrString(cleanedParts[0]),
+          paddingBottom: toNumberOrString(cleanedParts[1])
+        };
+      }
+    }
+    if (property === "marginBlock") {
+      if (cleanedParts.length === 1) {
+        return {
+          marginVertical: toNumberOrString(cleanedParts[0])
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          marginTop: toNumberOrString(cleanedParts[0]),
+          marginBottom: toNumberOrString(cleanedParts[1])
+        };
+      }
+    }
+    if (property === "insetInline") {
+      if (cleanedParts.length === 1) {
+        return {
+          left: toNumberOrString(cleanedParts[0]),
+          right: toNumberOrString(cleanedParts[0])
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          start: toNumberOrString(cleanedParts[0]),
+          end: toNumberOrString(cleanedParts[1])
+        };
+      }
+    }
+    if (property === "insetBlock") {
+      if (cleanedParts.length === 1) {
+        return {
+          top: toNumberOrString(cleanedParts[0]),
+          bottom: toNumberOrString(cleanedParts[0])
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          top: toNumberOrString(cleanedParts[0]),
+          bottom: toNumberOrString(cleanedParts[1])
+        };
+      }
+    }
+    return null;
+  };
+  this.transform = function (property, value, _ref8) {
+    var width = _ref8.width,
+      height = _ref8.height;
+    if (property.toLowerCase().endsWith("radius")) {
       value = _this.transformBorderRadius(property, value);
+    }
+    if (["paddingInline", "marginInline", "paddingBlock", "marginBlock", "paddingInlineStart", "paddingInlineEnd", "marginInlineStart", "marginInlineEnd", "insetInline", "insetInlineStart", "insetInlineEnd", "insetBlock", "insetBlockStart", "insetBlockEnd"].includes(property)) {
+      return _this.transformLogicalProperty(property, value);
     }
     if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
       return _this.transformBorder(property, value);

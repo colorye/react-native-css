@@ -59,7 +59,7 @@ export default function CssVars() {
   };
 
   this.isVar = (property) => {
-    return /^--\w+/.test(property);
+    return /^--[\w-]+/.test(property);
   };
 
   this.injectVar = (selector, value) => {

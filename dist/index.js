@@ -13,10 +13,13 @@ function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e 
 function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n = 0, F = function F() {}; return { s: F, n: function n() { return _n >= r.length ? { done: !0 } : { done: !1, value: r[_n++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0; } }
 function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length); for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e]; return n; }
-function getStylesheet(css) {
+function getStylesheet(css, filename) {
+  // 1. Run Tailwind CSS v4 preprocessing (supports oklch, @layer flattening, etc.)
   var preprocessedCss = (0, _css2.preprocessTailwindCss)(css);
   var ast = (0, _css.parse)(preprocessedCss);
   var stylesheet = new _stylesheet["default"]();
+
+  // Process regular rules
   var _iterator = _createForOfIteratorHelper(ast.stylesheet.rules || []),
     _step;
   try {
@@ -35,7 +38,7 @@ function getStylesheet(css) {
       if (_loop()) continue;
     }
 
-    // all @media will be injected at the end
+    // Process @media rules (injected at the end)
   } catch (err) {
     _iterator.e(err);
   } finally {
@@ -80,25 +83,36 @@ function getStylesheet(css) {
   } finally {
     _iterator2.f();
   }
-  if (process.env.NODE_ENV !== "production") {
-    debugStylesheets(stylesheet.toJSON());
-  }
-  return stylesheet.toJSON();
+  var jsonContent = stylesheet.toJSON();
+
+  // Always write the pre-computed stylesheet for Babel to read
+  writeStylesheetJSON(jsonContent, filename);
+  return jsonContent;
 }
-function debugStylesheets(content) {
+function writeStylesheetJSON(content, filename) {
   try {
-    var dir = _path["default"].join(__dirname);
-    _fs["default"].writeFileSync("".concat(dir, "/exported-stylesheet.json"), content, {
+    // Write to lib directory (where dist will be)
+    var libDir = _path["default"].join(__dirname);
+    _fs["default"].writeFileSync(_path["default"].join(libDir, "exported-stylesheet.json"), content, {
       mode: 493
     });
-  } catch (_unused) {}
+
+    // Also write next to the source CSS file for easier debugging
+    if (filename) {
+      _fs["default"].writeFileSync("".concat(filename, ".json"), content, {
+        mode: 493
+      });
+    }
+  } catch (_unused) {
+    // Silently fail - Babel will fall back to runtime
+  }
 }
 module.exports.transform = function (_ref) {
   var src = _ref.src,
     filename = _ref.filename,
     options = _ref.options;
   var projectRoot = options && options.projectRoot ? options.projectRoot : process.cwd();
-  var upstreamTransformer = function () {
+  var resolveTransformer = function () {
     var resolveOptions = {
       paths: [projectRoot]
     };
@@ -107,7 +121,7 @@ module.exports.transform = function (_ref) {
     } catch (error) {
       try {
         return require(require.resolve("@react-native/metro-babel-transformer", resolveOptions));
-      } catch (error) {
+      } catch (error2) {
         try {
           return require(require.resolve("metro-react-native-babel-transformer", resolveOptions));
         } catch (err) {
@@ -118,7 +132,11 @@ module.exports.transform = function (_ref) {
             try {
               return require("@react-native/metro-babel-transformer");
             } catch (e2) {
-              return require("metro-react-native-babel-transformer");
+              try {
+                return require("metro-react-native-babel-transformer");
+              } catch (e3) {
+                throw new Error("Failed to load any upstream babel-transformer. Please ensure either '@expo/metro-config', '@react-native/metro-babel-transformer', or 'metro-react-native-babel-transformer' is installed.");
+              }
             }
           }
         }
@@ -126,13 +144,13 @@ module.exports.transform = function (_ref) {
     }
   }();
   if (filename.endsWith(".css")) {
-    return upstreamTransformer.transform({
-      src: "module.exports = ".concat(getStylesheet(src)),
+    return resolveTransformer.transform({
+      src: "module.exports = ".concat(getStylesheet(src, filename)),
       filename: filename,
       options: options
     });
   }
-  return upstreamTransformer.transform({
+  return resolveTransformer.transform({
     src: src,
     filename: filename,
     options: options

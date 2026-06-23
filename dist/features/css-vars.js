@@ -80,7 +80,7 @@ function CssVars() {
     return _objectSpread(_objectSpread({}, _this.global), _this.data[selector] || {});
   };
   this.isVar = function (property) {
-    return /^--\w+/.test(property);
+    return /^--[\w-]+/.test(property);
   };
   this.injectVar = function (selector, value) {
     if (value === undefined) return value;

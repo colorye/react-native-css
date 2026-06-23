@@ -1,5 +1,5 @@
 const UNSUPPORTED_PROPERTIES = ["outline"];
-const remOrEmUnitRe = /([\d.]+)(?:rem|em)$/g;
+const remOrEmUnitRe = /([\d.]+)(?:rem|em)\b/g;
 
 export default function CssTransform() {
   this.transformUnsafeValue = (property, value) => {
@@ -8,8 +8,10 @@ export default function CssTransform() {
       return [];
     }
 
-    value = value.trim();
-    value = this.transformImportant(property, value);
+    if (typeof value === "string") {
+      value = value.trim();
+      value = this.transformImportant(property, value);
+    }
     value = this.transformPosition(property, value);
     value = this.transformBorderRadius(property, value);
 
@@ -19,17 +21,18 @@ export default function CssTransform() {
   };
 
   this.transformUnsupportedUnit = (value) => {
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
+    remOrEmUnitRe.lastIndex = 0;
     return value.replace(remOrEmUnitRe, (_, rem) => {
       return rem * 16;
     });
   };
 
   this.transformViewportUnit = (value, { width, height } = {}) => {
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
     if (!width || !height) return value;
 
-    const viewportUnitRe = /^([+-]?[0-9.]+)(vh|vw|vmin|vmax)$/g;
+    const viewportUnitRe = /([+-]?[0-9.]+)(vh|vw|vmin|vmax)\b/g;
     const dimensionsMap = {
       vw: width,
       vh: height,
@@ -40,7 +43,7 @@ export default function CssTransform() {
   };
 
   this.removeUnit = (value) => {
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
     return value.replace(/px/g, "");
   };
 
@@ -52,6 +55,7 @@ export default function CssTransform() {
   };
 
   this.transformImportant = (property, value) => {
+    if (typeof value !== "string") return value;
     return value.replace(/!important/g, "");
   };
 
@@ -63,7 +67,7 @@ export default function CssTransform() {
   };
 
   this.transformBorderRadius = (property, value) => {
-    if (property.endsWith("Radius") && typeof value === "string" && value.includes("%")) {
+    if (property.toLowerCase().endsWith("radius") && typeof value === "string" && value.includes("%")) {
       return 9999;
     }
     return value;
@@ -75,7 +79,7 @@ export default function CssTransform() {
     }
 
     const borderRe = /(\S+)(?:\s+(solid|dashed|dotted)(?:\s+(\S+))?)?/g;
-    const [, width, style, color] = borderRe.exec(value) || [];
+    const [, width, style, color] = borderRe.exec(String(value)) || [];
 
     const transformed = {};
 
@@ -97,37 +101,74 @@ export default function CssTransform() {
   };
 
   this.transformSpacing = (property, value) => {
-    const spacingRe = /\s*(\S+)(?:\s*(\S+)(?:\s*(\S+)(?:\s*(\S+))?)?)?\s*/g;
-    const [, top, right, bottom, left] = spacingRe.exec(value) || [];
+    const strValue = String(value).trim();
+    const parts = [];
+    let current = "";
+    let depth = 0;
+    for (let i = 0; i < strValue.length; i++) {
+      const char = strValue[i];
+      if (char === "(") {
+        depth++;
+        current += char;
+      } else if (char === ")") {
+        depth--;
+        current += char;
+      } else if (char === " " && depth === 0) {
+        if (current) {
+          parts.push(current);
+          current = "";
+        }
+      } else {
+        current += char;
+      }
+    }
+    if (current) {
+      parts.push(current);
+    }
+
+    const cleanedParts = parts.filter(Boolean);
+
+    const toNumberOrString = (val) => {
+      return isNaN(val) ? val : Number(val);
+    };
 
     const transformed = {};
 
-    // marginHorizontal not support auto
-    if (!top) {
+    if (cleanedParts.length === 0) {
       transformed[`${property}Top`] = 0;
       transformed[`${property}Right`] = 0;
       transformed[`${property}Bottom`] = 0;
       transformed[`${property}Left`] = 0;
-    } else if (!right) {
-      transformed[`${property}Top`] = isNaN(top) ? top : Number(top);
-      transformed[`${property}Right`] = isNaN(top) ? top : Number(top);
-      transformed[`${property}Bottom`] = isNaN(top) ? top : Number(top);
-      transformed[`${property}Left`] = isNaN(top) ? top : Number(top);
-    } else if (!bottom) {
-      transformed[`${property}Top`] = isNaN(top) ? top : Number(top);
-      transformed[`${property}Right`] = isNaN(right) ? right : Number(right);
-      transformed[`${property}Bottom`] = isNaN(top) ? top : Number(top);
-      transformed[`${property}Left`] = isNaN(right) ? right : Number(right);
-    } else if (!left) {
-      transformed[`${property}Top`] = isNaN(top) ? top : Number(top);
-      transformed[`${property}Right`] = isNaN(right) ? right : Number(right);
-      transformed[`${property}Bottom`] = isNaN(bottom) ? bottom : Number(bottom);
-      transformed[`${property}Left`] = isNaN(right) ? right : Number(right);
+    } else if (cleanedParts.length === 1) {
+      const top = cleanedParts[0];
+      transformed[`${property}Top`] = toNumberOrString(top);
+      transformed[`${property}Right`] = toNumberOrString(top);
+      transformed[`${property}Bottom`] = toNumberOrString(top);
+      transformed[`${property}Left`] = toNumberOrString(top);
+    } else if (cleanedParts.length === 2) {
+      const top = cleanedParts[0];
+      const right = cleanedParts[1];
+      transformed[`${property}Top`] = toNumberOrString(top);
+      transformed[`${property}Right`] = toNumberOrString(right);
+      transformed[`${property}Bottom`] = toNumberOrString(top);
+      transformed[`${property}Left`] = toNumberOrString(right);
+    } else if (cleanedParts.length === 3) {
+      const top = cleanedParts[0];
+      const right = cleanedParts[1];
+      const bottom = cleanedParts[2];
+      transformed[`${property}Top`] = toNumberOrString(top);
+      transformed[`${property}Right`] = toNumberOrString(right);
+      transformed[`${property}Bottom`] = toNumberOrString(bottom);
+      transformed[`${property}Left`] = toNumberOrString(right);
     } else {
-      transformed[`${property}Top`] = isNaN(top) ? top : Number(top);
-      transformed[`${property}Right`] = isNaN(right) ? right : Number(right);
-      transformed[`${property}Bottom`] = isNaN(bottom) ? bottom : Number(bottom);
-      transformed[`${property}Left`] = isNaN(left) ? left : Number(left);
+      const top = cleanedParts[0];
+      const right = cleanedParts[1];
+      const bottom = cleanedParts[2];
+      const left = cleanedParts[3];
+      transformed[`${property}Top`] = toNumberOrString(top);
+      transformed[`${property}Right`] = toNumberOrString(right);
+      transformed[`${property}Bottom`] = toNumberOrString(bottom);
+      transformed[`${property}Left`] = toNumberOrString(left);
     }
 
     return transformed;
@@ -136,9 +177,9 @@ export default function CssTransform() {
   this.transformFontWeight = (property, value) => {
     const fontWeightRe = /(normal|bold|100|200|300|400|500|600|700|800|900)/g;
 
-    if (!fontWeightRe.test(value)) return;
+    if (!fontWeightRe.test(String(value))) return;
     return {
-      [property]: value,
+      [property]: String(value),
     };
   };
 
@@ -148,8 +189,9 @@ export default function CssTransform() {
 
     const transforms = [];
     let match;
+    const strValue = String(value);
     do {
-      match = transformRe.exec(value);
+      match = transformRe.exec(strValue);
       if (!match) break;
 
       const [, token, val1, val2] = match;
@@ -182,9 +224,152 @@ export default function CssTransform() {
     return value;
   };
 
+  this.transformLogicalProperty = (property, value) => {
+    const strValue = String(value).trim();
+    const parts = [];
+    let current = "";
+    let depth = 0;
+    for (let i = 0; i < strValue.length; i++) {
+      const char = strValue[i];
+      if (char === "(") {
+        depth++;
+        current += char;
+      } else if (char === ")") {
+        depth--;
+        current += char;
+      } else if (char === " " && depth === 0) {
+        if (current) {
+          parts.push(current);
+          current = "";
+        }
+      } else {
+        current += char;
+      }
+    }
+    if (current) {
+      parts.push(current);
+    }
+
+    const cleanedParts = parts.filter(Boolean);
+
+    const toNumberOrString = (val) => {
+      return isNaN(val) ? val : Number(val);
+    };
+
+    if (property === "paddingInlineStart") return { paddingStart: toNumberOrString(value) };
+    if (property === "paddingInlineEnd") return { paddingEnd: toNumberOrString(value) };
+    if (property === "marginInlineStart") return { marginStart: toNumberOrString(value) };
+    if (property === "marginInlineEnd") return { marginEnd: toNumberOrString(value) };
+    if (property === "insetInlineStart") return { start: toNumberOrString(value) };
+    if (property === "insetInlineEnd") return { end: toNumberOrString(value) };
+    if (property === "insetBlockStart") return { top: toNumberOrString(value) };
+    if (property === "insetBlockEnd") return { bottom: toNumberOrString(value) };
+
+    if (property === "paddingInline") {
+      if (cleanedParts.length === 1) {
+        return { paddingHorizontal: toNumberOrString(cleanedParts[0]) };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          paddingStart: toNumberOrString(cleanedParts[0]),
+          paddingEnd: toNumberOrString(cleanedParts[1]),
+        };
+      }
+    }
+
+    if (property === "marginInline") {
+      if (cleanedParts.length === 1) {
+        return { marginHorizontal: toNumberOrString(cleanedParts[0]) };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          marginStart: toNumberOrString(cleanedParts[0]),
+          marginEnd: toNumberOrString(cleanedParts[1]),
+        };
+      }
+    }
+
+    if (property === "paddingBlock") {
+      if (cleanedParts.length === 1) {
+        return { paddingVertical: toNumberOrString(cleanedParts[0]) };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          paddingTop: toNumberOrString(cleanedParts[0]),
+          paddingBottom: toNumberOrString(cleanedParts[1]),
+        };
+      }
+    }
+
+    if (property === "marginBlock") {
+      if (cleanedParts.length === 1) {
+        return { marginVertical: toNumberOrString(cleanedParts[0]) };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          marginTop: toNumberOrString(cleanedParts[0]),
+          marginBottom: toNumberOrString(cleanedParts[1]),
+        };
+      }
+    }
+
+    if (property === "insetInline") {
+      if (cleanedParts.length === 1) {
+        return {
+          left: toNumberOrString(cleanedParts[0]),
+          right: toNumberOrString(cleanedParts[0]),
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          start: toNumberOrString(cleanedParts[0]),
+          end: toNumberOrString(cleanedParts[1]),
+        };
+      }
+    }
+
+    if (property === "insetBlock") {
+      if (cleanedParts.length === 1) {
+        return {
+          top: toNumberOrString(cleanedParts[0]),
+          bottom: toNumberOrString(cleanedParts[0]),
+        };
+      }
+      if (cleanedParts.length >= 2) {
+        return {
+          top: toNumberOrString(cleanedParts[0]),
+          bottom: toNumberOrString(cleanedParts[1]),
+        };
+      }
+    }
+
+    return null;
+  };
+
   this.transform = (property, value, { width, height }) => {
-    if (property.endsWith("Radius")) {
+    if (property.toLowerCase().endsWith("radius")) {
       value = this.transformBorderRadius(property, value);
+    }
+
+    if (
+      [
+        "paddingInline",
+        "marginInline",
+        "paddingBlock",
+        "marginBlock",
+        "paddingInlineStart",
+        "paddingInlineEnd",
+        "marginInlineStart",
+        "marginInlineEnd",
+        "insetInline",
+        "insetInlineStart",
+        "insetInlineEnd",
+        "insetBlock",
+        "insetBlockStart",
+        "insetBlockEnd",
+      ].includes(property)
+    ) {
+      return this.transformLogicalProperty(property, value);
     }
 
     if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
