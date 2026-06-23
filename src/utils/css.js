@@ -196,8 +196,36 @@ function removeContainerClass(cssStr) {
   return cssStr.substring(0, index) + cssStr.substring(j);
 }
 
+function extractPropertiesAndInjectToRoot(cssStr) {
+  const properties = {};
+  const propertyRegex = /@property\s+(--[a-zA-Z0-9_-]+)\s*\{([\s\S]*?)\}/g;
+  let match;
+  while ((match = propertyRegex.exec(cssStr)) !== null) {
+    const name = match[1];
+    const body = match[2];
+    const valMatch = body.match(/initial-value:\s*([^;]+);/);
+    if (valMatch) {
+      properties[name] = valMatch[1].trim();
+    }
+  }
+
+  const rootRegex = /(:root|:root\s*,\s*:host)\s*\{/g;
+  const rootMatch = rootRegex.exec(cssStr);
+  if (rootMatch) {
+    const insertIndex = rootMatch.index + rootMatch[0].length;
+    let injectedProps = "\n";
+    for (const [name, val] of Object.entries(properties)) {
+      injectedProps += `    ${name}: ${val};\n`;
+    }
+    return cssStr.substring(0, insertIndex) + injectedProps + cssStr.substring(insertIndex);
+  }
+
+  return cssStr;
+}
+
 export function preprocessTailwindCss(css) {
-  let preprocessedCss = flattenLayersAndSupports(css);
+  let preprocessedCss = extractPropertiesAndInjectToRoot(css);
+  preprocessedCss = flattenLayersAndSupports(preprocessedCss);
   preprocessedCss = removeContainerClass(preprocessedCss);
   preprocessedCss = simplifyDoubleSelectors(preprocessedCss);
   preprocessedCss = convertOklchToRgbOrHex(preprocessedCss);

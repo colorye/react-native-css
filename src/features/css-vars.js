@@ -70,15 +70,15 @@ export default function CssVars() {
       if (typeof val !== "string") return val;
 
       return val.replace(
-        /var\((--[^,)]+)(?:,\s*([^)]+))?\)/g,
+        /var\((--[^,)]+)(?:,\s*([^)]*))?\)/g,
         function (match, variableName, defaultValue) {
           if (seen.has(variableName)) {
-            return defaultValue || DEFAULT_VARIABLE_VALUE;
+            return defaultValue !== undefined ? defaultValue : DEFAULT_VARIABLE_VALUE;
           }
           seen.add(variableName);
           const resolvedVal = variables[variableName];
-          if (resolvedVal === undefined) {
-            return defaultValue || DEFAULT_VARIABLE_VALUE;
+          if (resolvedVal === undefined || resolvedVal === "initial") {
+            return defaultValue !== undefined ? defaultValue : DEFAULT_VARIABLE_VALUE;
           }
           return resolve(resolvedVal, seen);
         },

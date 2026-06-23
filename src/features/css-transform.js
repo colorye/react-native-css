@@ -63,7 +63,7 @@ export default function CssTransform() {
   };
 
   this.transformBorderRadius = (property, value) => {
-    if (property === "borderRadius" && value.includes("%")) {
+    if (property.endsWith("Radius") && typeof value === "string" && value.includes("%")) {
       return 9999;
     }
     return value;
@@ -183,6 +183,10 @@ export default function CssTransform() {
   };
 
   this.transform = (property, value, { width, height }) => {
+    if (property.endsWith("Radius")) {
+      value = this.transformBorderRadius(property, value);
+    }
+
     if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
       return this.transformBorder(property, value);
     }

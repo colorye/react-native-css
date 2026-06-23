@@ -88,14 +88,14 @@ function CssVars() {
     var _resolve = function resolve(val) {
       var seen = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : new Set();
       if (typeof val !== "string") return val;
-      return val.replace(/var\((--[^,)]+)(?:,\s*([^)]+))?\)/g, function (match, variableName, defaultValue) {
+      return val.replace(/var\((--[^,)]+)(?:,\s*([^)]*))?\)/g, function (match, variableName, defaultValue) {
         if (seen.has(variableName)) {
-          return defaultValue || DEFAULT_VARIABLE_VALUE;
+          return defaultValue !== undefined ? defaultValue : DEFAULT_VARIABLE_VALUE;
         }
         seen.add(variableName);
         var resolvedVal = variables[variableName];
-        if (resolvedVal === undefined) {
-          return defaultValue || DEFAULT_VARIABLE_VALUE;
+        if (resolvedVal === undefined || resolvedVal === "initial") {
+          return defaultValue !== undefined ? defaultValue : DEFAULT_VARIABLE_VALUE;
         }
         return _resolve(resolvedVal, seen);
       });

@@ -71,7 +71,7 @@ function CssTransform() {
     return value;
   };
   this.transformBorderRadius = function (property, value) {
-    if (property === "borderRadius" && value.includes("%")) {
+    if (property.endsWith("Radius") && typeof value === "string" && value.includes("%")) {
       return 9999;
     }
     return value;
@@ -183,6 +183,9 @@ function CssTransform() {
   this.transform = function (property, value, _ref0) {
     var width = _ref0.width,
       height = _ref0.height;
+    if (property.endsWith("Radius")) {
+      value = _this.transformBorderRadius(property, value);
+    }
     if (["border", "borderTop", "borderBottom", "borderLeft", "borderRight"].includes(property)) {
       return _this.transformBorder(property, value);
     }

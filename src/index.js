@@ -4,18 +4,6 @@ import { parse as cssParse } from "css";
 import Stylesheet from "./features/stylesheet";
 import { preprocessTailwindCss } from "./utils/css";
 
-const upstreamTransformer = (() => {
-  try {
-    return require("@expo/metro-config/babel-transformer");
-  } catch (error) {
-    try {
-      return require("@react-native/metro-babel-transformer");
-    } catch (error) {
-      return require("metro-react-native-babel-transformer");
-    }
-  }
-})();
-
 function getStylesheet(css) {
   const preprocessedCss = preprocessTailwindCss(css);
   const ast = cssParse(preprocessedCss);
@@ -73,6 +61,47 @@ function debugStylesheets(content) {
 }
 
 module.exports.transform = function ({ src, filename, options }) {
+  const projectRoot =
+    options && options.projectRoot ? options.projectRoot : process.cwd();
+
+  const upstreamTransformer = (() => {
+    const resolveOptions = { paths: [projectRoot] };
+    try {
+      return require(
+        require.resolve("@expo/metro-config/babel-transformer", resolveOptions),
+      );
+    } catch (error) {
+      try {
+        return require(
+          require.resolve(
+            "@react-native/metro-babel-transformer",
+            resolveOptions,
+          ),
+        );
+      } catch (error) {
+        try {
+          return require(
+            require.resolve(
+              "metro-react-native-babel-transformer",
+              resolveOptions,
+            ),
+          );
+        } catch (err) {
+          // Fallback to normal require in case of non-standard setups
+          try {
+            return require("@expo/metro-config/babel-transformer");
+          } catch (e) {
+            try {
+              return require("@react-native/metro-babel-transformer");
+            } catch (e2) {
+              return require("metro-react-native-babel-transformer");
+            }
+          }
+        }
+      }
+    }
+  })();
+
   if (filename.endsWith(".css")) {
     return upstreamTransformer.transform({
       src: `module.exports = ${getStylesheet(src)}`,
