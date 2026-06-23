@@ -1,6 +1,6 @@
 {
   "name": "@colorye/react-native-css",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Rye Nguyen <ryenguyen7411@gmail.com>",
   "license": "MIT",
   "main": "./dist/index.js",
