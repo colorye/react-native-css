@@ -14,6 +14,7 @@ export default function CssTransform() {
     }
     value = this.transformPosition(property, value);
     value = this.transformBorderRadius(property, value);
+    value = this.transformOpacity(property, value);
 
     property = this.getAliasedPropertyName(property);
 
@@ -69,6 +70,16 @@ export default function CssTransform() {
   this.transformBorderRadius = (property, value) => {
     if (property.toLowerCase().endsWith("radius") && typeof value === "string" && value.includes("%")) {
       return 9999;
+    }
+    return value;
+  };
+
+  this.transformOpacity = (property, value) => {
+    if (property === "opacity" && typeof value === "string" && value.endsWith("%")) {
+      const num = parseFloat(value);
+      if (!isNaN(num)) {
+        return num / 100;
+      }
     }
     return value;
   };
@@ -349,6 +360,10 @@ export default function CssTransform() {
   this.transform = (property, value, { width, height }) => {
     if (property.toLowerCase().endsWith("radius")) {
       value = this.transformBorderRadius(property, value);
+    }
+
+    if (property === "opacity") {
+      value = this.transformOpacity(property, value);
     }
 
     if (

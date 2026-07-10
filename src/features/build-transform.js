@@ -33,8 +33,10 @@ const itohex = (component) => {
 const toNumber = (value) => {
   if (typeof value === "number") return value;
   if (typeof value !== "string") return value;
-  const num = parseFloat(value);
-  return !isNaN(num) && String(num) === value ? num : value;
+  const trimmed = value.trim();
+  if (trimmed === "") return value;
+  const num = Number(trimmed);
+  return !isNaN(num) ? num : value;
 };
 
 // ============================================================================
@@ -107,6 +109,17 @@ export function transformPosition(property, value) {
 export function transformBorderRadius(property, value) {
   if (property.toLowerCase().endsWith("radius") && typeof value === "string" && value.includes("%")) {
     return 9999;
+  }
+  return value;
+}
+
+/** Transform opacity with % → decimal */
+export function transformOpacity(property, value) {
+  if (property === "opacity" && typeof value === "string" && value.endsWith("%")) {
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+      return num / 100;
+    }
   }
   return value;
 }
@@ -416,6 +429,7 @@ export function precomputeValue(property, value) {
   processed = transformColor(processed);
   processed = transformPosition(property, processed);
   processed = transformBorderRadius(property, processed);
+  processed = transformOpacity(property, processed);
 
   // Get aliased property
   const aliasedProp = getAliasedProperty(property);

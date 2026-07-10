@@ -29,6 +29,7 @@ function CssTransform() {
     }
     value = _this.transformPosition(property, value);
     value = _this.transformBorderRadius(property, value);
+    value = _this.transformOpacity(property, value);
     property = _this.getAliasedPropertyName(property);
     return [property, value];
   };
@@ -77,6 +78,15 @@ function CssTransform() {
   this.transformBorderRadius = function (property, value) {
     if (property.toLowerCase().endsWith("radius") && typeof value === "string" && value.includes("%")) {
       return 9999;
+    }
+    return value;
+  };
+  this.transformOpacity = function (property, value) {
+    if (property === "opacity" && typeof value === "string" && value.endsWith("%")) {
+      var num = parseFloat(value);
+      if (!isNaN(num)) {
+        return num / 100;
+      }
     }
     return value;
   };
@@ -354,6 +364,9 @@ function CssTransform() {
       height = _ref8.height;
     if (property.toLowerCase().endsWith("radius")) {
       value = _this.transformBorderRadius(property, value);
+    }
+    if (property === "opacity") {
+      value = _this.transformOpacity(property, value);
     }
     if (["paddingInline", "marginInline", "paddingBlock", "marginBlock", "paddingInlineStart", "paddingInlineEnd", "marginInlineStart", "marginInlineEnd", "insetInline", "insetInlineStart", "insetInlineEnd", "insetBlock", "insetBlockStart", "insetBlockEnd"].includes(property)) {
       return _this.transformLogicalProperty(property, value);

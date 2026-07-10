@@ -223,9 +223,29 @@ function extractPropertiesAndInjectToRoot(cssStr) {
   return cssStr;
 }
 
+function flattenNestedAmpersandRules(cssStr) {
+  let current = cssStr;
+  let prev;
+
+  const nestedRuleRe = /([^{}@][^{]*?)\s*\{\s*(&[^{]*?)\s*\{([^{}]*)\}\s*\}/g;
+
+  do {
+    prev = current;
+    current = current.replace(nestedRuleRe, (_match, parentSelector, childSelector, declarations) => {
+      const parent = parentSelector.trim();
+      const child = childSelector.trim();
+      const merged = child.replace(/&/g, parent);
+      return `${merged} {${declarations}}`;
+    });
+  } while (current !== prev);
+
+  return current;
+}
+
 export function preprocessTailwindCss(css) {
   let preprocessedCss = extractPropertiesAndInjectToRoot(css);
   preprocessedCss = flattenLayersAndSupports(preprocessedCss);
+  preprocessedCss = flattenNestedAmpersandRules(preprocessedCss);
   preprocessedCss = removeContainerClass(preprocessedCss);
   preprocessedCss = simplifyDoubleSelectors(preprocessedCss);
   preprocessedCss = convertOklchToRgbOrHex(preprocessedCss);

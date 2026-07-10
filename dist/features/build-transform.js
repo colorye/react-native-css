@@ -20,6 +20,7 @@ exports.removeImportant = removeImportant;
 exports.removePxUnit = removePxUnit;
 exports.transformBorderRadius = transformBorderRadius;
 exports.transformColor = transformColor;
+exports.transformOpacity = transformOpacity;
 exports.transformPosition = transformPosition;
 exports.transformRemEm = transformRemEm;
 function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
@@ -64,8 +65,10 @@ var itohex = function itohex(component) {
 var toNumber = function toNumber(value) {
   if (typeof value === "number") return value;
   if (typeof value !== "string") return value;
-  var num = parseFloat(value);
-  return !isNaN(num) && String(num) === value ? num : value;
+  var trimmed = value.trim();
+  if (trimmed === "") return value;
+  var num = Number(trimmed);
+  return !isNaN(num) ? num : value;
 };
 
 // ============================================================================
@@ -138,6 +141,17 @@ function transformPosition(property, value) {
 function transformBorderRadius(property, value) {
   if (property.toLowerCase().endsWith("radius") && typeof value === "string" && value.includes("%")) {
     return 9999;
+  }
+  return value;
+}
+
+/** Transform opacity with % → decimal */
+function transformOpacity(property, value) {
+  if (property === "opacity" && typeof value === "string" && value.endsWith("%")) {
+    var num = parseFloat(value);
+    if (!isNaN(num)) {
+      return num / 100;
+    }
   }
   return value;
 }
@@ -444,6 +458,7 @@ function precomputeValue(property, value) {
   processed = transformColor(processed);
   processed = transformPosition(property, processed);
   processed = transformBorderRadius(property, processed);
+  processed = transformOpacity(property, processed);
 
   // Get aliased property
   var aliasedProp = getAliasedProperty(property);

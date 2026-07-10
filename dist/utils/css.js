@@ -212,9 +212,25 @@ function extractPropertiesAndInjectToRoot(cssStr) {
   }
   return cssStr;
 }
+function flattenNestedAmpersandRules(cssStr) {
+  var current = cssStr;
+  var prev;
+  var nestedRuleRe = /([^{}@][^{]*?)\s*\{\s*(&[^{]*?)\s*\{([^{}]*)\}\s*\}/g;
+  do {
+    prev = current;
+    current = current.replace(nestedRuleRe, function (_match, parentSelector, childSelector, declarations) {
+      var parent = parentSelector.trim();
+      var child = childSelector.trim();
+      var merged = child.replace(/&/g, parent);
+      return "".concat(merged, " {").concat(declarations, "}");
+    });
+  } while (current !== prev);
+  return current;
+}
 function preprocessTailwindCss(css) {
   var preprocessedCss = extractPropertiesAndInjectToRoot(css);
   preprocessedCss = flattenLayersAndSupports(preprocessedCss);
+  preprocessedCss = flattenNestedAmpersandRules(preprocessedCss);
   preprocessedCss = removeContainerClass(preprocessedCss);
   preprocessedCss = simplifyDoubleSelectors(preprocessedCss);
   preprocessedCss = convertOklchToRgbOrHex(preprocessedCss);
