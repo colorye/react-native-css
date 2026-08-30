@@ -1,3 +1,5 @@
+import Runtime from "../transformer-runtime.js";
+
 export function isImportOrRequire(statement) {
   return (
     statement.isImportDeclaration() ||
@@ -76,40 +78,30 @@ export function getStaticClassNameValue(t, classNameAttr) {
 }
 
 /**
- * Check if a class is fully static (no _dynamic property)
+ * Check if a class is fully static (no dynamic breakpoint / dark mode queries)
  */
 export function isClassStatic(stylesheet, className) {
-  const decl = stylesheet[className];
-  if (!decl) return true; // Non-existent class is "static" (no-op)
-  if (decl._dynamic && Object.keys(decl._dynamic).length > 0) return false;
-  if (decl._static) return true; // Has _static wrapper
-  // Check if it's a plain object (fully static, no wrapper)
-  return typeof decl === "object" && !decl._dynamic;
-}
-
-/**
- * Get static styles from a class declaration
- */
-export function getStaticStylesFromClass(stylesheet, className) {
-  const decl = stylesheet[className];
-  if (!decl) return {};
-
-  // If has _static wrapper, use that
-  if (decl._static) return { ...decl._static };
-
-  // If plain object (fully static), use directly
-  if (typeof decl === "object" && !decl._dynamic) {
-    // Filter out any metadata keys
-    const result = {};
-    for (const [key, value] of Object.entries(decl)) {
-      if (!key.startsWith("_") && !key.startsWith("@media")) {
-        result[key] = value;
-      }
-    }
-    return result;
+  if (!className) return true;
+  if (
+    className === "group" ||
+    className.startsWith("group") ||
+    className.startsWith("peer") ||
+    className.startsWith("active:") ||
+    className.startsWith("pressed:") ||
+    className.startsWith("disabled:") ||
+    className.startsWith("dark:") ||
+    className.startsWith("light:") ||
+    className.startsWith("sm:") ||
+    className.startsWith("md:") ||
+    className.startsWith("lg:") ||
+    className.startsWith("xl:") ||
+    className.startsWith("2xl:") ||
+    className.startsWith("portrait:") ||
+    className.startsWith("landscape:")
+  ) {
+    return false;
   }
-
-  return {};
+  return true;
 }
 
 /**
@@ -122,20 +114,70 @@ export function areAllClassesStatic(stylesheet, classNameValue) {
 }
 
 /**
- * Compute merged static styles from className string
+ * Compute merged static styles from className string using Runtime compiler
  */
 export function computeStaticStyles(stylesheet, classNameValue) {
   if (!classNameValue || !stylesheet) return {};
-
-  const classes = classNameValue.trim().split(/\s+/).filter(Boolean);
-  let result = {};
-
-  for (const cls of classes) {
-    const styles = getStaticStylesFromClass(stylesheet, cls);
-    result = { ...result, ...styles };
+  try {
+    const computed = Runtime.getStyle(stylesheet, [undefined, classNameValue, undefined]);
+    return computed || {};
+  } catch {
+    return {};
   }
+}
 
-  return result;
+/**
+ * Inlines static className and contentContainerClassName attributes directly into styles
+ */
+export function inlineStaticAttributes(path, state, t) {
+  if (!state.stylesheetData) return;
+
+  const openingElement = path.node.openingElement;
+  const stylesheet = state.stylesheetData;
+
+  const classPropMappings = [
+    { classProp: "className", styleProp: "style" },
+    { classProp: "contentContainerClassName", styleProp: "contentContainerStyle" },
+  ];
+
+  for (const { classProp, styleProp } of classPropMappings) {
+    const classAttrIndex = openingElement.attributes.findIndex(
+      (attr) => t.isJSXAttribute(attr) && attr.name?.name === classProp,
+    );
+    if (classAttrIndex === -1) continue;
+
+    const classAttr = openingElement.attributes[classAttrIndex];
+    if (!isStaticClassName(t, classAttr)) continue;
+
+    const classValue = getStaticClassNameValue(t, classAttr);
+    if (!classValue || !areAllClassesStatic(stylesheet, classValue)) continue;
+
+    const staticStyles = computeStaticStyles(stylesheet, classValue);
+    if (!staticStyles || Object.keys(staticStyles).length === 0) continue;
+
+    const styleAST = objectToAST(t, staticStyles);
+
+    // Find existing style prop if present
+    const existingStyle = openingElement.attributes.find(
+      (attr) => t.isJSXAttribute(attr) && attr.name?.name === styleProp,
+    );
+
+    if (existingStyle) {
+      const currentVal = t.isJSXExpressionContainer(existingStyle.value)
+        ? existingStyle.value.expression
+        : existingStyle.value;
+      existingStyle.value = t.jsxExpressionContainer(
+        t.arrayExpression([styleAST, currentVal]),
+      );
+    } else {
+      openingElement.attributes.push(
+        t.jsxAttribute(t.jsxIdentifier(styleProp), t.jsxExpressionContainer(styleAST)),
+      );
+    }
+
+    // Remove the static class attribute to achieve zero runtime parsing
+    openingElement.attributes.splice(classAttrIndex, 1);
+  }
 }
 
 /**
@@ -345,7 +387,36 @@ export function getStyleExpression(path, state, t) {
 }
 
 export function getInheritStyleExpression(path, state, t) {
-  return t.callExpression(state.getInheritStyleId, [getStyleExpression(path, state, t)]);
+  const openingElement = path.node.openingElement;
+  const inheritStyle = openingElement.attributes.find((attr) => attr.name?.name === "inheritStyle");
+
+  const propInheritStyle = getMemoizedInheritStyleExpression(path, t);
+  const inheritStyleExpr = inheritStyle?.value?.expression || propInheritStyle;
+
+  const classNameAttr = openingElement.attributes.find((attr) => attr.name?.name === "className");
+  const styleAttr = openingElement.attributes.find((attr) => attr.name?.name === "style");
+
+  return t.callExpression(state.getInheritStyleId, [
+    t.callExpression(state.getStyleId, [
+      state.stylesheetId,
+      t.arrayExpression([
+        inheritStyleExpr || t.nullLiteral(),
+        (classNameAttr?.value &&
+          (t.isStringLiteral(classNameAttr.value)
+            ? t.stringLiteral(classNameAttr.value.value)
+            : classNameAttr.value.expression)) ||
+          t.nullLiteral(),
+        styleAttr?.value?.expression || t.nullLiteral(),
+        t.isJSXIdentifier(openingElement.name)
+          ? t.stringLiteral(openingElement.name.name)
+          : t.isJSXMemberExpression(openingElement.name)
+            ? t.stringLiteral(
+                `${openingElement.name.object.name}.${openingElement.name.property.name}`,
+              )
+            : t.stringLiteral("Unknown"),
+      ]),
+    ]),
+  ]);
 }
 
 export function getRootInheritStyleExpression(path, t) {

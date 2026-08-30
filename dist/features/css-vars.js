@@ -18,7 +18,6 @@ function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) 
 function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length); for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e]; return n; }
 function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
 function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
-var DEFAULT_VARIABLE_VALUE = 0;
 function CssVars() {
   var _this = this;
   this.global = {};
@@ -83,62 +82,72 @@ function CssVars() {
     return /^--[\w-]+/.test(property);
   };
   this.injectVar = function (selector, value) {
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
     var variables = _this.get(selector);
-    var findTopLevelComma = function findTopLevelComma(str) {
-      var depth = 0;
-      for (var i = 0; i < str.length; i++) {
-        var _char = str[i];
-        if (_char === "(") depth++;else if (_char === ")") depth--;else if (_char === "," && depth === 0) return i;
-      }
-      return -1;
-    };
-    var _resolveValue = function resolveValue(val) {
-      var seen = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : new Set();
-      if (typeof val !== "string") return val;
-      var result = val;
-      var hasVar = result.includes("var(");
-      while (hasVar) {
-        var start = result.indexOf("var(");
-        if (start === -1) break;
-        var depth = 0;
-        var end = -1;
-        for (var i = start + 3; i < result.length; i++) {
-          var _char2 = result[i];
-          if (_char2 === "(") {
+    function resolveOnce(str) {
+      var result = "";
+      var i = 0;
+      var changed = false;
+      while (i < str.length) {
+        var varIndex = str.indexOf("var(", i);
+        if (varIndex === -1) {
+          result += str.slice(i);
+          break;
+        }
+        result += str.slice(i, varIndex);
+        var depth = 1;
+        var j = varIndex + 4;
+        var commaIndex = -1;
+        while (j < str.length && depth > 0) {
+          if (str[j] === "(") {
             depth++;
-          } else if (_char2 === ")") {
+          } else if (str[j] === ")") {
             depth--;
-            if (depth === 0) {
-              end = i;
-              break;
-            }
+          } else if (str[j] === "," && depth === 1 && commaIndex === -1) {
+            commaIndex = j;
           }
+          j++;
         }
-        if (end === -1) break;
-        var inner = result.slice(start + 4, end);
-        var commaIdx = findTopLevelComma(inner);
-        var variableName = (commaIdx === -1 ? inner : inner.slice(0, commaIdx)).trim();
-        var defaultValue = commaIdx === -1 ? undefined : inner.slice(commaIdx + 1).trim();
-        var resolved = void 0;
-        if (seen.has(variableName)) {
-          resolved = defaultValue !== undefined ? _resolveValue(defaultValue, seen) : DEFAULT_VARIABLE_VALUE;
+        if (depth !== 0) {
+          result += str.slice(varIndex);
+          break;
+        }
+        changed = true;
+        var varName = void 0,
+          fallback = void 0;
+        if (commaIndex !== -1) {
+          varName = str.slice(varIndex + 4, commaIndex).trim();
+          fallback = str.slice(commaIndex + 1, j - 1).trim();
         } else {
-          seen.add(variableName);
-          var resolvedVal = variables[variableName];
-          if (resolvedVal === undefined || resolvedVal === "initial") {
-            resolved = defaultValue !== undefined ? _resolveValue(defaultValue, seen) : DEFAULT_VARIABLE_VALUE;
-          } else {
-            resolved = _resolveValue(resolvedVal, seen);
-          }
+          varName = str.slice(varIndex + 4, j - 1).trim();
+          fallback = undefined;
         }
-        result = result.slice(0, start) + String(resolved) + result.slice(end + 1);
-        hasVar = result.includes("var(");
-        seen = new Set();
+        var val = variables[varName];
+        if (val !== undefined && val !== "initial" && val !== "") {
+          result += val;
+        } else if (fallback !== undefined) {
+          result += fallback;
+        } else {
+          result += "";
+        }
+        i = j;
       }
-      return result;
-    };
-    return _resolveValue(value);
+      return {
+        result: result,
+        changed: changed
+      };
+    }
+    var current = value;
+    var iterations = 0;
+    while (iterations < 10) {
+      var _resolveOnce = resolveOnce(current),
+        result = _resolveOnce.result,
+        changed = _resolveOnce.changed;
+      if (!changed || result === current) break;
+      current = result;
+      iterations++;
+    }
+    return current;
   };
   return this;
 }

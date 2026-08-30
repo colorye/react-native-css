@@ -1,11 +1,13 @@
 {
   "name": "@colorye/react-native-css",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "author": "Rye Nguyen <ryenguyen7411@gmail.com>",
   "license": "MIT",
   "main": "./dist/index.js",
   "scripts": {
-    "build": "rm -rf ./dist && npx babel ./src -d ./dist --copy-files"
+    "build:native": "cd crates/transformer && cargo build --release && cp target/release/libcolorye_react_native_css_transformer.dylib transformer.node && codesign --force --deep -s - transformer.node",
+    "build:js": "rm -rf ./dist && yarn run babel ./src -d ./dist --copy-files",
+    "build": "yarn build:native && yarn build:js"
   },
   "devDependencies": {
     "@babel/cli": "^7.22.9",
@@ -14,11 +16,21 @@
     "@babel/preset-env": "^7.22.9"
   },
   "dependencies": {
-    "css": "^3.0.0"
+    "lightningcss": "^1.29.0"
   },
+  "files": [
+    "dist",
+    "src",
+    "crates/transformer/index.js",
+    "crates/transformer/transformer.node",
+    "package.json"
+  ],
   "exports": {
     ".": "./dist/index.js",
+    "./transformer": "./dist/transformer.js",
+    "./native": "./crates/transformer/index.js",
     "./babel": "./dist/babel.js",
+    "./exported-stylesheet.json": "./dist/exported-stylesheet.json",
     "./dist/transformer-runtime": "./dist/transformer-runtime.js",
     "./dist/transformer-runtime.js": "./dist/transformer-runtime.js"
   }

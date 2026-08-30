@@ -1,4 +1,13 @@
-import { Appearance, Dimensions, PixelRatio } from "react-native";
+let RN = {};
+try {
+  RN = require("react-native");
+} catch {
+  // Safe in Node/Babel build environment
+}
+const Appearance = RN.Appearance || { getColorScheme: () => "light" };
+const Dimensions = RN.Dimensions || { get: () => ({ width: 375, height: 812 }) };
+const PixelRatio = RN.PixelRatio || { roundToNearestPixel: (n) => n };
+
 import CssCalc from "./features/css-calc";
 import CssMedia from "./features/css-media";
 import CssTransform from "./features/css-transform";
@@ -20,27 +29,6 @@ const INHERIT_PROPERTIES = [
   "textTransform",
 ];
 
-const NUMERIC_INHERIT_PROPERTIES = ["fontSize", "lineHeight", "letterSpacing"];
-
-const toNumericIfPossible = (value) => {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string") return value;
-
-  const trimmed = value.trim();
-  if (trimmed === "") return value;
-
-  const pxMatch = /^([\d.]+)px$/.exec(trimmed);
-  if (pxMatch) return Number(pxMatch[1]);
-
-  const num = Number(trimmed);
-  return Number.isFinite(num) ? num : value;
-};
-
-const coerceNumericInheritValue = (property, value) => {
-  if (!NUMERIC_INHERIT_PROPERTIES.includes(property)) return value;
-  return toNumericIfPossible(value);
-};
-
 // ============================================================================
 // Singleton Helper Instances
 // ============================================================================
@@ -59,14 +47,22 @@ let currentCacheKey = null;
 
 function getDimensions() {
   if (!cachedDimensions) {
-    cachedDimensions = Dimensions.get("window");
+    try {
+      cachedDimensions = Dimensions?.get?.("window") || { width: 375, height: 812 };
+    } catch {
+      cachedDimensions = { width: 375, height: 812 };
+    }
   }
   return cachedDimensions;
 }
 
 function getColorScheme() {
   if (cachedColorScheme === null) {
-    cachedColorScheme = Appearance.getColorScheme();
+    try {
+      cachedColorScheme = Appearance?.getColorScheme?.() || "light";
+    } catch {
+      cachedColorScheme = "light";
+    }
   }
   return cachedColorScheme;
 }
@@ -84,9 +80,18 @@ function invalidateCache() {
   currentCacheKey = null;
 }
 
+function clearCache() {
+  TRANSFORM_CACHE = {};
+  currentCacheKey = null;
+}
+
 // Event listeners for cache invalidation
-Dimensions.addEventListener("change", invalidateCache);
-Appearance.addChangeListener(invalidateCache);
+try {
+  Dimensions?.addEventListener?.("change", invalidateCache);
+  Appearance?.addChangeListener?.(invalidateCache);
+} catch {
+  // Ignore in environments where listeners are not supported
+}
 
 // ============================================================================
 // Flatten Style
@@ -121,6 +126,9 @@ function getFlattenStyle(declarations) {
 // ============================================================================
 function transformStyles(stylesheet, classNames) {
   if (!stylesheet || !classNames) return undefined;
+  if (stylesheet.default && typeof stylesheet.default === "object" && !stylesheet[":root"]) {
+    stylesheet = stylesheet.default;
+  }
 
   const { width, height } = getDimensions();
   const colorScheme = getColorScheme();
@@ -140,7 +148,32 @@ function transformStyles(stylesheet, classNames) {
       return TRANSFORM_CACHE[className];
     }
 
-    const declaration = stylesheet[className];
+    let declaration = stylesheet[className];
+    if (!declaration) {
+      if (
+        className.startsWith("active:") ||
+        className.startsWith("pressed:") ||
+        className.startsWith("disabled:") ||
+        className.startsWith("group-active:") ||
+        className.startsWith("group-pressed:")
+      ) {
+        const base = className
+          .replace(/^(active|pressed|disabled):/, "")
+          .replace(/^group-(active|pressed):/, "");
+        declaration =
+          stylesheet[base] ||
+          stylesheet[className] ||
+          stylesheet[`disabled:${base}`] ||
+          stylesheet[`active:${base}`] ||
+          stylesheet[`group-active:${base}`];
+      } else {
+        declaration =
+          stylesheet[`active:${className}`] ||
+          stylesheet[`pressed:${className}`] ||
+          stylesheet[`disabled:${className}`] ||
+          stylesheet[`group-active:${className}`];
+      }
+    }
     const globalDeclaration = stylesheet[":root"];
 
     if (!declaration && !globalDeclaration) {
@@ -172,8 +205,13 @@ function transformStyles(stylesheet, classNames) {
     const staticPart = declaration?._static || {};
     const dynamicPart = declaration?._dynamic || (declaration?._static ? {} : declaration) || {};
 
-    // Start with pre-computed static styles
-    let results = { ...staticPart };
+    // Start with pre-computed static styles (excluding CSS variables starting with --)
+    let results = {};
+    for (const key in staticPart) {
+      if (!vars.isVar(key)) {
+        results[key] = staticPart[key];
+      }
+    }
 
     // Process dynamic properties
     const transformDynamic = (currentSelector, decl) => {
@@ -190,7 +228,11 @@ function transformStyles(stylesheet, classNames) {
             // Media query value might have _static/_dynamic too
             const mediaStatic = value?._static || {};
             const mediaDynamic = value?._dynamic || (value?._static ? {} : value) || {};
-            Object.assign(results, mediaStatic);
+            for (const key in mediaStatic) {
+              if (!vars.isVar(key)) {
+                results[key] = mediaStatic[key];
+              }
+            }
             transformDynamic(property, mediaDynamic);
           }
           continue;
@@ -216,7 +258,11 @@ function transformStyles(stylesheet, classNames) {
 
         const transformed = transform.transform(property, value, { width, height });
         if (transformed) {
-          Object.assign(results, transformed);
+          for (const key in transformed) {
+            if (!vars.isVar(key)) {
+              results[key] = transformed[key];
+            }
+          }
         }
       }
     };
@@ -239,7 +285,7 @@ function getInheritStyle(declarations) {
   const inheritDeclarations = {};
   for (const key of INHERIT_PROPERTIES) {
     if (declarations[key] !== undefined) {
-      inheritDeclarations[key] = coerceNumericInheritValue(key, declarations[key]);
+      inheritDeclarations[key] = declarations[key];
     }
   }
 
@@ -249,12 +295,15 @@ function getInheritStyle(declarations) {
 // ============================================================================
 // Main Entry Point
 // ============================================================================
-function getStyle(stylesheet, [inheritStyle, className, style]) {
-  return getFlattenStyle([
-    getInheritStyle(getFlattenStyle(inheritStyle)),
-    transformStyles(stylesheet, className),
+function getStyle(stylesheet, [inheritStyle, className, style, elementName]) {
+  const inherited = getInheritStyle(getFlattenStyle(inheritStyle));
+  const transformed = transformStyles(stylesheet, className);
+  const result = getFlattenStyle([
+    inherited,
+    transformed,
     style,
   ]);
+  return result;
 }
 
 // ============================================================================
@@ -279,7 +328,7 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
       inherited = {};
       for (const key of INHERIT_PROPERTIES) {
         if (flatInherit[key] !== undefined) {
-          inherited[key] = coerceNumericInheritValue(key, flatInherit[key]);
+          inherited[key] = flatInherit[key];
         }
       }
       if (Object.keys(inherited).length === 0) {
@@ -295,14 +344,22 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
 
   const result = {};
   if (inherited) Object.assign(result, inherited);
-  if (staticStyles) Object.assign(result, staticStyles);
+  if (staticStyles) {
+    for (const key in staticStyles) {
+      if (!vars.isVar(key)) {
+        result[key] = staticStyles[key];
+      }
+    }
+  }
   if (inlineStyle) Object.assign(result, inlineStyle);
 
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export default {
+  getFlattenStyle,
   getStyle,
   getInheritStyle,
   mergeStyles,
+  clearCache,
 };

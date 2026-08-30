@@ -140,6 +140,69 @@ function parseColor(colorStr) {
     return { ...rgb, a };
   }
 
+  // oklch(L C H [/ A])
+  const oklchMatch = colorStr.match(/oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)(?:deg)?(?:\s*\/\s*([\d.]+)(%?))?\s*\)/);
+  if (oklchMatch) {
+    let L = parseFloat(oklchMatch[1]);
+    if (oklchMatch[2] === "%" || L > 1) L = L / 100;
+    const C = parseFloat(oklchMatch[3]);
+    const H = parseFloat(oklchMatch[4]);
+    let a = 1;
+    if (oklchMatch[5] !== undefined) {
+      a = parseFloat(oklchMatch[5]);
+      if (oklchMatch[6] === "%") a = a / 100;
+    }
+    const hRad = (H * Math.PI) / 180;
+    const okA = C * Math.cos(hRad);
+    const okB = C * Math.sin(hRad);
+    const l_ = L + 0.3963377774 * okA + 0.2158037573 * okB;
+    const m_ = L - 0.1055613458 * okA - 0.0638541728 * okB;
+    const s_ = L - 0.0894841775 * okA - 1.291485548 * okB;
+    const l = l_ * l_ * l_;
+    const m = m_ * m_ * m_;
+    const s = s_ * s_ * s_;
+    const r = +4.0767439362 * l - 3.3077115913 * m + 0.2309699292 * s;
+    const g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+    const bl = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+    const gamma = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(0, c), 1 / 2.4) - 0.055);
+    return {
+      r: Math.max(0, Math.min(255, Math.round(gamma(r) * 255))),
+      g: Math.max(0, Math.min(255, Math.round(gamma(g) * 255))),
+      b: Math.max(0, Math.min(255, Math.round(gamma(bl) * 255))),
+      a,
+    };
+  }
+
+  // lab(L a b [/ A])
+  const labMatch = colorStr.match(/lab\(\s*([\d.]+)(%?)\s+([+-]?[\d.]+)\s+([+-]?[\d.]+)(?:\s*\/\s*([\d.]+)(%?))?\s*\)/);
+  if (labMatch) {
+    let L = parseFloat(labMatch[1]);
+    const labA = parseFloat(labMatch[3]);
+    const labB = parseFloat(labMatch[4]);
+    let a = 1;
+    if (labMatch[5] !== undefined) {
+      a = parseFloat(labMatch[5]);
+      if (labMatch[6] === "%") a = a / 100;
+    }
+    let y = (L + 16) / 116;
+    let x = labA / 500 + y;
+    let z = y - labB / 200;
+    const fInv = (t) => (t > 6 / 29 ? t * t * t : 3 * (6 / 29) * (6 / 29) * (t - 4 / 29));
+    x = 0.95047 * fInv(x);
+    y = 1.0 * fInv(y);
+    z = 1.08883 * fInv(z);
+    let r = 3.2406 * x - 1.5372 * y - 0.4986 * z;
+    let g = -0.9689 * x + 1.8758 * y + 0.0415 * z;
+    let bl = 0.0557 * x - 0.204 * y + 1.057 * z;
+    const gamma = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(0, c), 1 / 2.4) - 0.055);
+    return {
+      r: Math.max(0, Math.min(255, Math.round(gamma(r) * 255))),
+      g: Math.max(0, Math.min(255, Math.round(gamma(g) * 255))),
+      b: Math.max(0, Math.min(255, Math.round(gamma(bl) * 255))),
+      a,
+    };
+  }
+
   // Basic named colors fallback
   const basicColors = {
     white: { r: 255, g: 255, b: 255, a: 1 },
@@ -283,19 +346,110 @@ function resolveColorMix(value) {
   return value;
 }
 
+function safeEvalMath(expr) {
+  if (!expr || typeof expr !== "string") return 0;
+
+  // Clean rem and px units if present
+  const sanitized = expr
+    .replace(/([\d.]+)rem/g, (_, n) => `${parseFloat(n) * 16}`)
+    .replace(/([\d.]+)px/g, "$1");
+
+  let pos = 0;
+  const len = sanitized.length;
+
+  function peek() {
+    while (pos < len && sanitized.charCodeAt(pos) <= 32) pos++;
+    return pos < len ? sanitized[pos] : "";
+  }
+
+  function get() {
+    const ch = peek();
+    pos++;
+    return ch;
+  }
+
+  function parseFactor() {
+    const ch = peek();
+    if (ch === "+") {
+      get();
+      return parseFactor();
+    }
+    if (ch === "-") {
+      get();
+      return -parseFactor();
+    }
+    if (ch === "(") {
+      get();
+      const val = parseExpression();
+      if (peek() === ")") get();
+      return val;
+    }
+
+    // Parse number
+    const start = pos;
+    let hasDot = false;
+    while (pos < len) {
+      const c = sanitized[pos];
+      if (c >= "0" && c <= "9") {
+        pos++;
+      } else if (c === "." && !hasDot) {
+        hasDot = true;
+        pos++;
+      } else {
+        break;
+      }
+    }
+
+    if (start === pos) return 0;
+    const numStr = sanitized.slice(start, pos);
+    const num = parseFloat(numStr);
+    return isNaN(num) ? 0 : num;
+  }
+
+  function parseTerm() {
+    let result = parseFactor();
+    while (true) {
+      const op = peek();
+      if (op === "*" || op === "/") {
+        get();
+        const factor = parseFactor();
+        result = op === "*" ? result * factor : (factor !== 0 ? result / factor : 0);
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+
+  function parseExpression() {
+    let result = parseTerm();
+    while (true) {
+      const op = peek();
+      if (op === "+" || op === "-") {
+        get();
+        const term = parseTerm();
+        result = op === "+" ? result + term : result - term;
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+
+  try {
+    const val = parseExpression();
+    return isNaN(val) ? 0 : val;
+  } catch {
+    return 0;
+  }
+}
+
 export default function CssCalc() {
   this.calc = (value) => {
     if (value === undefined || typeof value !== "string") return value;
 
     return value.replace(calcRe, (_, calc) => {
-      try {
-        // eslint-disable-next-line
-        const calcFunc = new Function(`return ${calc}`);
-        const calcValue = calcFunc();
-        return calcValue;
-      } catch {
-        return 0;
-      }
+      return safeEvalMath(calc);
     });
   };
 
@@ -303,6 +457,16 @@ export default function CssCalc() {
     if (value === undefined || typeof value !== "string") return value;
 
     value = resolveColorMix(value);
+
+    // If the entire value is a single color (hex, rgb, hsl, oklch, lab), normalize to hex/rgba
+    const parsed = parseColor(value);
+    if (parsed) {
+      if (parsed.a === 1) {
+        return `#${itohex(parsed.r)}${itohex(parsed.g)}${itohex(parsed.b)}`;
+      }
+      const a = Math.round(parsed.a * 255);
+      return `#${itohex(parsed.r)}${itohex(parsed.g)}${itohex(parsed.b)}${itohex(a)}`;
+    }
 
     value = value.replace(colorRe1, (_, r, g, b, a) => {
       a = parseFloat(a);

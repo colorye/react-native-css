@@ -1,7 +1,5 @@
 import CssMedia from "./css-media";
 
-const DEFAULT_VARIABLE_VALUE = 0;
-
 export default function CssVars() {
   this.global = {};
   this.data = {};
@@ -63,81 +61,77 @@ export default function CssVars() {
   };
 
   this.injectVar = (selector, value) => {
-    if (value === undefined) return value;
+    if (value === undefined || typeof value !== "string") return value;
 
     const variables = this.get(selector);
 
-    const findTopLevelComma = (str) => {
-      let depth = 0;
-      for (let i = 0; i < str.length; i++) {
-        const char = str[i];
-        if (char === "(") depth++;
-        else if (char === ")") depth--;
-        else if (char === "," && depth === 0) return i;
-      }
-      return -1;
-    };
+    function resolveOnce(str) {
+      let result = "";
+      let i = 0;
+      let changed = false;
 
-    const resolveValue = (val, seen = new Set()) => {
-      if (typeof val !== "string") return val;
+      while (i < str.length) {
+        const varIndex = str.indexOf("var(", i);
+        if (varIndex === -1) {
+          result += str.slice(i);
+          break;
+        }
 
-      let result = val;
-      let hasVar = result.includes("var(");
+        result += str.slice(i, varIndex);
+        let depth = 1;
+        let j = varIndex + 4;
+        let commaIndex = -1;
 
-      while (hasVar) {
-        const start = result.indexOf("var(");
-        if (start === -1) break;
-
-        let depth = 0;
-        let end = -1;
-        for (let i = start + 3; i < result.length; i++) {
-          const char = result[i];
-          if (char === "(") {
+        while (j < str.length && depth > 0) {
+          if (str[j] === "(") {
             depth++;
-          } else if (char === ")") {
+          } else if (str[j] === ")") {
             depth--;
-            if (depth === 0) {
-              end = i;
-              break;
-            }
+          } else if (str[j] === "," && depth === 1 && commaIndex === -1) {
+            commaIndex = j;
           }
+          j++;
         }
 
-        if (end === -1) break;
+        if (depth !== 0) {
+          result += str.slice(varIndex);
+          break;
+        }
 
-        const inner = result.slice(start + 4, end);
-        const commaIdx = findTopLevelComma(inner);
-        const variableName = (commaIdx === -1 ? inner : inner.slice(0, commaIdx)).trim();
-        const defaultValue = commaIdx === -1 ? undefined : inner.slice(commaIdx + 1).trim();
-
-        let resolved;
-        if (seen.has(variableName)) {
-          resolved =
-            defaultValue !== undefined
-              ? resolveValue(defaultValue, seen)
-              : DEFAULT_VARIABLE_VALUE;
+        changed = true;
+        let varName, fallback;
+        if (commaIndex !== -1) {
+          varName = str.slice(varIndex + 4, commaIndex).trim();
+          fallback = str.slice(commaIndex + 1, j - 1).trim();
         } else {
-          seen.add(variableName);
-          const resolvedVal = variables[variableName];
-          if (resolvedVal === undefined || resolvedVal === "initial") {
-            resolved =
-              defaultValue !== undefined
-                ? resolveValue(defaultValue, seen)
-                : DEFAULT_VARIABLE_VALUE;
-          } else {
-            resolved = resolveValue(resolvedVal, seen);
-          }
+          varName = str.slice(varIndex + 4, j - 1).trim();
+          fallback = undefined;
         }
 
-        result = result.slice(0, start) + String(resolved) + result.slice(end + 1);
-        hasVar = result.includes("var(");
-        seen = new Set();
+        const val = variables[varName];
+        if (val !== undefined && val !== "initial" && val !== "") {
+          result += val;
+        } else if (fallback !== undefined) {
+          result += fallback;
+        } else {
+          result += "";
+        }
+
+        i = j;
       }
 
-      return result;
-    };
+      return { result, changed };
+    }
 
-    return resolveValue(value);
+    let current = value;
+    let iterations = 0;
+    while (iterations < 10) {
+      const { result, changed } = resolveOnce(current);
+      if (!changed || result === current) break;
+      current = result;
+      iterations++;
+    }
+    return current;
   };
 
   return this;

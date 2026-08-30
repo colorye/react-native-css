@@ -16,4 +16,10 @@ node_modules/
 # macOS
 .DS_Store
 
+dist/
+exported-stylesheet.json
+src/exported-stylesheet.json
 dist/exported-stylesheet.json
+*.node
+target/
+**/target/

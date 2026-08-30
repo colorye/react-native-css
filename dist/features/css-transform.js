@@ -16,17 +16,6 @@ function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e 
 function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
 var UNSUPPORTED_PROPERTIES = ["outline"];
 var remOrEmUnitRe = /([\d.]+)(?:rem|em)\b/g;
-var NUMERIC_TYPOGRAPHY_PROPERTIES = ["fontSize", "lineHeight", "letterSpacing"];
-var toNumericIfPossible = function toNumericIfPossible(value) {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string") return value;
-  var trimmed = value.trim();
-  if (trimmed === "") return value;
-  var pxMatch = /^([\d.]+)px$/.exec(trimmed);
-  if (pxMatch) return Number(pxMatch[1]);
-  var num = Number(trimmed);
-  return Number.isFinite(num) ? num : value;
-};
 function CssTransform() {
   var _this = this;
   this.transformUnsafeValue = function (property, value) {
@@ -68,8 +57,7 @@ function CssTransform() {
   };
   this.removeUnit = function (value) {
     if (value === undefined || typeof value !== "string") return value;
-    var withoutPx = value.replace(/px/g, "");
-    return toNumericIfPossible(withoutPx);
+    return value.replace(/px/g, "");
   };
   this.isPropertySupported = function (property, value) {
     if (UNSUPPORTED_PROPERTIES.includes(property)) return false;
@@ -224,16 +212,17 @@ function CssTransform() {
   this.transformFontScaling = function (property, value, _ref7) {
     var width = _ref7.width,
       roundFn = _ref7.roundFn;
-    if (!NUMERIC_TYPOGRAPHY_PROPERTIES.includes(property)) return value;
-    value = toNumericIfPossible(value);
-    if (typeof value !== "number") return value;
+    if (!["fontSize", "lineHeight"].includes(property)) return value;
 
     // Base width for design (iPhone 6/7/8)
     var baseWidth = 375;
 
     // Calculate scaling factor based on device width
     var scaleFactor = width ? width / baseWidth : 1;
-    return roundFn(value * scaleFactor);
+    if (!isNaN(value)) {
+      return roundFn(Number(value) * scaleFactor);
+    }
+    return value;
   };
   this.transformLogicalProperty = function (property, value) {
     var strValue = String(value).trim();
@@ -396,11 +385,24 @@ function CssTransform() {
     if (["fontWeight"].includes(property)) {
       return _this.transformFontWeight(property, value);
     }
+    if (["scale"].includes(property)) {
+      var scaleVal = value;
+      if (typeof scaleVal === "string") {
+        var first = scaleVal.trim().split(/\s+/)[0];
+        if (first.endsWith("%")) {
+          scaleVal = parseFloat(first) / 100;
+        } else {
+          scaleVal = parseFloat(first);
+        }
+      }
+      return {
+        transform: [{
+          scale: isNaN(scaleVal) ? 1 : Number(scaleVal)
+        }]
+      };
+    }
     if (["transform"].includes(property)) {
       return _this.transformTransform(property, value);
-    }
-    if (NUMERIC_TYPOGRAPHY_PROPERTIES.includes(property)) {
-      return _defineProperty({}, property, toNumericIfPossible(value));
     }
     return _defineProperty({}, property, isNaN(value) ? value : Number(value));
   };

@@ -1,4 +1,10 @@
-function flattenLayersAndSupports(cssStr) {
+import { transform } from "lightningcss";
+import { camelize } from "./helper";
+
+/**
+ * Unwrap @layer and @supports blocks to expose standard CSS rules
+ */
+function flattenBlocks(cssStr) {
   let result = "";
   let i = 0;
   const len = cssStr.length;
@@ -35,64 +41,33 @@ function flattenLayersAndSupports(cssStr) {
       continue;
     }
 
-    // Check for @layer or @supports
+    // Check for at-rules
     if (cssStr[i] === "@") {
       const remaining = cssStr.substring(i);
-      const layerMatch = remaining.match(/^@layer\s+[^{]+\{/i);
-      const supportsMatch = remaining.match(/^@supports\s+[^{]+\{/i);
-
-      if (layerMatch || supportsMatch) {
-        const match = layerMatch || supportsMatch;
-        const matchStr = match[0];
-        let braceCount = 1;
-        let j = i + matchStr.length;
-        let innerContent = "";
-
-        while (j < len && braceCount > 0) {
-          if (cssStr[j] === "/" && cssStr[j + 1] === "*") {
-            const commentEnd = cssStr.indexOf("*/", j + 2);
-            if (commentEnd === -1) {
-              innerContent += cssStr.substring(j);
-              j = len;
-              break;
-            }
-            innerContent += cssStr.substring(j, commentEnd + 2);
-            j = commentEnd + 2;
-            continue;
+      const layerMatch = remaining.match(/^@(layer|supports|property)[^{]+\{/i);
+      if (layerMatch) {
+        if (layerMatch[1].toLowerCase() === "property") {
+          let braceCount = 1;
+          let j = i + layerMatch[0].length;
+          while (j < len && braceCount > 0) {
+            if (cssStr[j] === "{") braceCount++;
+            else if (cssStr[j] === "}") braceCount--;
+            j++;
           }
-
-          if (cssStr[j] === '"' || cssStr[j] === "'") {
-            const char = cssStr[j];
-            let strEnd = j + 1;
-            while (strEnd < len) {
-              if (cssStr[strEnd] === "\\") {
-                strEnd += 2;
-              } else if (cssStr[strEnd] === char) {
-                strEnd++;
-                break;
-              } else {
-                strEnd++;
-              }
-            }
-            innerContent += cssStr.substring(j, strEnd);
-            j = strEnd;
-            continue;
-          }
-
-          if (cssStr[j] === "{") {
-            braceCount++;
-          } else if (cssStr[j] === "}") {
-            braceCount--;
-          }
-
-          if (braceCount > 0) {
-            innerContent += cssStr[j];
-          }
-          j++;
+          i = j;
+          continue;
         }
 
-        const flattenedInner = flattenLayersAndSupports(innerContent);
-        result += flattenedInner;
+        let braceCount = 1;
+        let j = i + layerMatch[0].length;
+        let innerContent = "";
+        while (j < len && braceCount > 0) {
+          if (cssStr[j] === "{") braceCount++;
+          else if (cssStr[j] === "}") braceCount--;
+          if (braceCount > 0) innerContent += cssStr[j];
+          j++;
+        }
+        result += flattenBlocks(innerContent);
         i = j;
         continue;
       }
@@ -105,150 +80,139 @@ function flattenLayersAndSupports(cssStr) {
   return result;
 }
 
-function convertRangeMediaQueries(cssStr) {
-  let result = cssStr.replace(
-    /\(\s*width\s*>=\s*([^)]+)\)/gi,
-    "(min-width: $1)",
-  );
-  result = result.replace(/\(\s*width\s*>\s*([^)]+)\)/gi, "(min-width: $1)");
-  result = result.replace(/\(\s*width\s*<=\s*([^)]+)\)/gi, "(max-width: $1)");
-  result = result.replace(/\(\s*width\s*<\s*([^)]+)\)/gi, "(max-width: $1)");
-  return result;
-}
-
-function simplifyDoubleSelectors(cssStr) {
-  return cssStr.replace(/(\.[a-z0-9_\\\-:]+)\1/gi, "$1");
-}
-
-function linearToSrgb(c) {
-  return c > 0.0031308 ? 1.055 * Math.pow(c, 1 / 2.4) - 0.055 : 12.92 * c;
-}
-
-function oklchToRgb(l, c, h) {
-  const hRad = (h * Math.PI) / 180;
-  const a = c * Math.cos(hRad);
-  const b = c * Math.sin(hRad);
-
-  const l_ = l + 0.3963377774 * a + 0.2158037573 * b;
-  const m_ = l - 0.1055613458 * a - 0.0638541728 * b;
-  const s_ = l - 0.0894841775 * a - 1.291485548 * b;
-
-  const l3 = l_ * l_ * l_;
-  const m3 = m_ * m_ * m_;
-  const s3 = s_ * s_ * s_;
-
-  let r = +4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3;
-  let g = -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3;
-  let b_rgb = -0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3;
-
-  r = linearToSrgb(r);
-  g = linearToSrgb(g);
-  b_rgb = linearToSrgb(b_rgb);
-
-  r = Math.max(0, Math.min(255, Math.round(r * 255)));
-  g = Math.max(0, Math.min(255, Math.round(g * 255)));
-  b_rgb = Math.max(0, Math.min(255, Math.round(b_rgb * 255)));
-
-  return { r, g, b: b_rgb };
-}
-
-function convertOklchToRgbOrHex(cssStr) {
-  const oklchRegex =
-    /oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)/gi;
-
-  return cssStr.replace(oklchRegex, (match, lStr, cStr, hStr, aStr) => {
-    let l = parseFloat(lStr);
-    if (lStr.includes("%")) {
-      l = l / 100;
-    }
-    const c = parseFloat(cStr);
-    const h = parseFloat(hStr);
-
-    const { r, g, b } = oklchToRgb(l, c, h);
-
-    if (aStr) {
-      let a = parseFloat(aStr);
-      if (aStr.includes("%")) {
-        a = a / 100;
-      }
-      return `rgba(${r}, ${g}, ${b}, ${a})`;
-    }
-
-    return "#" + [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("");
+/**
+ * Parse and lower modern CSS using LightningCSS (Rust-based engine)
+ * Handles OKLCH, color-mix, CSS nesting, @layer, and @media range queries
+ */
+export function parseStylesheetWithLightning(rawCss) {
+  const transformed = transform({
+    filename: "input.css",
+    code: Buffer.from(rawCss),
+    targets: {
+      safari: 14 << 16,
+    },
+    minify: false,
   });
-}
 
-function removeContainerClass(cssStr) {
-  const index = cssStr.indexOf(".container {");
-  if (index === -1) return cssStr;
+  const cssText = flattenBlocks(transformed.code.toString());
+  const rawStylesheet = {};
 
-  let braceCount = 1;
-  let j = index + ".container {".length;
-  while (j < cssStr.length && braceCount > 0) {
-    if (cssStr[j] === "{") {
-      braceCount++;
-    } else if (cssStr[j] === "}") {
-      braceCount--;
+  const cleanSelector = (sel) => {
+    if (sel.includes(":root")) return [":root"];
+
+    let s = sel.trim();
+    if (!s.startsWith(".")) return [];
+
+    // Strip leading dot
+    s = s.slice(1);
+
+    // Extract class name (handling escaped chars like active\:scale-95, w-\[48\%\], etc.)
+    let classPart = "";
+    let i = 0;
+    while (i < s.length) {
+      if (s[i] === "\\") {
+        if (i + 1 < s.length) {
+          classPart += s[i + 1];
+          i += 2;
+          continue;
+        }
+      }
+      if (s[i] === ":" || s[i] === " " || s[i] === ">" || s[i] === "~" || s[i] === "+") {
+        break;
+      }
+      classPart += s[i];
+      i++;
     }
-    j++;
-  }
 
-  return cssStr.substring(0, index) + cssStr.substring(j);
-}
+    if (!classPart) return [];
 
-function extractPropertiesAndInjectToRoot(cssStr) {
-  const properties = {};
-  const propertyRegex = /@property\s+(--[a-zA-Z0-9_-]+)\s*\{([\s\S]*?)\}/g;
+    const names = [classPart];
+
+    // For variants like disabled:bg-navy-300 or active:opacity-80, also register the base class name
+    if (
+      classPart.startsWith("disabled:") ||
+      classPart.startsWith("active:") ||
+      classPart.startsWith("pressed:")
+    ) {
+      const base = classPart.replace(/^(disabled|active|pressed):/, "");
+      if (base && !names.includes(base)) {
+        names.push(base);
+      }
+    }
+
+    return names;
+  };
+
+  const parseDeclarations = (bodyText) => {
+    const decls = {};
+    const parts = bodyText.split(";");
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const colonIdx = trimmed.indexOf(":");
+      if (colonIdx === -1) continue;
+      const prop = trimmed.slice(0, colonIdx).trim();
+      const val = trimmed.slice(colonIdx + 1).trim();
+      if (!prop || !val) continue;
+
+      if (prop.startsWith("--")) {
+        decls[prop] = val;
+      } else {
+        decls[camelize(prop)] = val;
+      }
+    }
+    return decls;
+  };
+
+  // 1. Separate media query blocks
+  const mediaBlocks = [];
+  const noMediaCss = cssText.replace(/@media\s*([^{]+)\{([\s\S]+?\}\s*)\}/g, (_, query, inner) => {
+    mediaBlocks.push({ query: query.trim(), inner });
+    return "";
+  });
+
+  // 2. Parse regular rules
+  const ruleRe = /([^{}]+)\{([^{}]+)\}/g;
   let match;
-  while ((match = propertyRegex.exec(cssStr)) !== null) {
-    const name = match[1];
-    const body = match[2];
-    const valMatch = body.match(/initial-value:\s*([^;]+);/);
-    if (valMatch) {
-      properties[name] = valMatch[1].trim();
+  while ((match = ruleRe.exec(noMediaCss)) !== null) {
+    const rawSelectors = match[1].trim();
+    const body = match[2].trim();
+    if (rawSelectors.startsWith("@")) continue;
+
+    const selectors = rawSelectors.split(",").map((s) => s.trim());
+    const decls = parseDeclarations(body);
+
+    for (const sel of selectors) {
+      if (!sel.startsWith(".") && !sel.includes(":root")) continue;
+      const names = cleanSelector(sel);
+      for (const name of names) {
+        rawStylesheet[name] = { ...rawStylesheet[name], ...decls };
+      }
     }
   }
 
-  const rootRegex = /(:root|:root\s*,\s*:host)\s*\{/g;
-  const rootMatch = rootRegex.exec(cssStr);
-  if (rootMatch) {
-    const insertIndex = rootMatch.index + rootMatch[0].length;
-    let injectedProps = "\n";
-    for (const [name, val] of Object.entries(properties)) {
-      injectedProps += `    ${name}: ${val};\n`;
+  // 3. Parse media query rules
+  for (const mb of mediaBlocks) {
+    let mMatch;
+    const mRuleRe = /([^{}]+)\{([^{}]+)\}/g;
+    while ((mMatch = mRuleRe.exec(mb.inner)) !== null) {
+      const rawSelectors = mMatch[1].trim();
+      const body = mMatch[2].trim();
+      const selectors = rawSelectors.split(",").map((s) => s.trim());
+      const decls = parseDeclarations(body);
+
+      for (const sel of selectors) {
+        if (!sel.startsWith(".") && !sel.includes(":root")) continue;
+        const names = cleanSelector(sel);
+        for (const name of names) {
+          rawStylesheet[name] = {
+            ...rawStylesheet[name],
+            [`@media ${mb.query}`]: decls,
+          };
+        }
+      }
     }
-    return cssStr.substring(0, insertIndex) + injectedProps + cssStr.substring(insertIndex);
   }
 
-  return cssStr;
-}
-
-function flattenNestedAmpersandRules(cssStr) {
-  let current = cssStr;
-  let prev;
-
-  const nestedRuleRe = /([^{}@][^{]*?)\s*\{\s*(&[^{]*?)\s*\{([^{}]*)\}\s*\}/g;
-
-  do {
-    prev = current;
-    current = current.replace(nestedRuleRe, (_match, parentSelector, childSelector, declarations) => {
-      const parent = parentSelector.trim();
-      const child = childSelector.trim();
-      const merged = child.replace(/&/g, parent);
-      return `${merged} {${declarations}}`;
-    });
-  } while (current !== prev);
-
-  return current;
-}
-
-export function preprocessTailwindCss(css) {
-  let preprocessedCss = extractPropertiesAndInjectToRoot(css);
-  preprocessedCss = flattenLayersAndSupports(preprocessedCss);
-  preprocessedCss = flattenNestedAmpersandRules(preprocessedCss);
-  preprocessedCss = removeContainerClass(preprocessedCss);
-  preprocessedCss = simplifyDoubleSelectors(preprocessedCss);
-  preprocessedCss = convertOklchToRgbOrHex(preprocessedCss);
-  preprocessedCss = convertRangeMediaQueries(preprocessedCss);
-  return preprocessedCss;
+  return rawStylesheet;
 }

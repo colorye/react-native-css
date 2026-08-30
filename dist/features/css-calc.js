@@ -178,6 +178,75 @@ function parseColor(colorStr) {
     });
   }
 
+  // oklch(L C H [/ A])
+  var oklchMatch = colorStr.match(/oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)(?:deg)?(?:\s*\/\s*([\d.]+)(%?))?\s*\)/);
+  if (oklchMatch) {
+    var L = parseFloat(oklchMatch[1]);
+    if (oklchMatch[2] === "%" || L > 1) L = L / 100;
+    var C = parseFloat(oklchMatch[3]);
+    var H = parseFloat(oklchMatch[4]);
+    var _a4 = 1;
+    if (oklchMatch[5] !== undefined) {
+      _a4 = parseFloat(oklchMatch[5]);
+      if (oklchMatch[6] === "%") _a4 = _a4 / 100;
+    }
+    var hRad = H * Math.PI / 180;
+    var okA = C * Math.cos(hRad);
+    var okB = C * Math.sin(hRad);
+    var l_ = L + 0.3963377774 * okA + 0.2158037573 * okB;
+    var m_ = L - 0.1055613458 * okA - 0.0638541728 * okB;
+    var s_ = L - 0.0894841775 * okA - 1.291485548 * okB;
+    var _l = l_ * l_ * l_;
+    var m = m_ * m_ * m_;
+    var _s = s_ * s_ * s_;
+    var _r3 = +4.0767439362 * _l - 3.3077115913 * m + 0.2309699292 * _s;
+    var _g3 = -1.2684380046 * _l + 2.6097574011 * m - 0.3413193965 * _s;
+    var bl = -0.0041960863 * _l - 0.7034186147 * m + 1.707614701 * _s;
+    var gamma = function gamma(c) {
+      return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(0, c), 1 / 2.4) - 0.055;
+    };
+    return {
+      r: Math.max(0, Math.min(255, Math.round(gamma(_r3) * 255))),
+      g: Math.max(0, Math.min(255, Math.round(gamma(_g3) * 255))),
+      b: Math.max(0, Math.min(255, Math.round(gamma(bl) * 255))),
+      a: _a4
+    };
+  }
+
+  // lab(L a b [/ A])
+  var labMatch = colorStr.match(/lab\(\s*([\d.]+)(%?)\s+([+-]?[\d.]+)\s+([+-]?[\d.]+)(?:\s*\/\s*([\d.]+)(%?))?\s*\)/);
+  if (labMatch) {
+    var _L = parseFloat(labMatch[1]);
+    var labA = parseFloat(labMatch[3]);
+    var labB = parseFloat(labMatch[4]);
+    var _a5 = 1;
+    if (labMatch[5] !== undefined) {
+      _a5 = parseFloat(labMatch[5]);
+      if (labMatch[6] === "%") _a5 = _a5 / 100;
+    }
+    var y = (_L + 16) / 116;
+    var x = labA / 500 + y;
+    var z = y - labB / 200;
+    var fInv = function fInv(t) {
+      return t > 6 / 29 ? t * t * t : 3 * (6 / 29) * (6 / 29) * (t - 4 / 29);
+    };
+    x = 0.95047 * fInv(x);
+    y = 1.0 * fInv(y);
+    z = 1.08883 * fInv(z);
+    var _r4 = 3.2406 * x - 1.5372 * y - 0.4986 * z;
+    var _g4 = -0.9689 * x + 1.8758 * y + 0.0415 * z;
+    var _bl = 0.0557 * x - 0.204 * y + 1.057 * z;
+    var _gamma = function _gamma(c) {
+      return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(0, c), 1 / 2.4) - 0.055;
+    };
+    return {
+      r: Math.max(0, Math.min(255, Math.round(_gamma(_r4) * 255))),
+      g: Math.max(0, Math.min(255, Math.round(_gamma(_g4) * 255))),
+      b: Math.max(0, Math.min(255, Math.round(_gamma(_bl) * 255))),
+      a: _a5
+    };
+  }
+
   // Basic named colors fallback
   var basicColors = {
     white: {
@@ -343,23 +412,115 @@ function resolveColorMix(value) {
   value = value.replace(/COLOR_MIX_TEMP\(/gi, "color-mix(");
   return value;
 }
+function safeEvalMath(expr) {
+  if (!expr || typeof expr !== "string") return 0;
+
+  // Clean rem and px units if present
+  var sanitized = expr.replace(/([\d.]+)rem/g, function (_, n) {
+    return "".concat(parseFloat(n) * 16);
+  }).replace(/([\d.]+)px/g, "$1");
+  var pos = 0;
+  var len = sanitized.length;
+  function peek() {
+    while (pos < len && sanitized.charCodeAt(pos) <= 32) pos++;
+    return pos < len ? sanitized[pos] : "";
+  }
+  function get() {
+    var ch = peek();
+    pos++;
+    return ch;
+  }
+  function parseFactor() {
+    var ch = peek();
+    if (ch === "+") {
+      get();
+      return parseFactor();
+    }
+    if (ch === "-") {
+      get();
+      return -parseFactor();
+    }
+    if (ch === "(") {
+      get();
+      var val = parseExpression();
+      if (peek() === ")") get();
+      return val;
+    }
+
+    // Parse number
+    var start = pos;
+    var hasDot = false;
+    while (pos < len) {
+      var c = sanitized[pos];
+      if (c >= "0" && c <= "9") {
+        pos++;
+      } else if (c === "." && !hasDot) {
+        hasDot = true;
+        pos++;
+      } else {
+        break;
+      }
+    }
+    if (start === pos) return 0;
+    var numStr = sanitized.slice(start, pos);
+    var num = parseFloat(numStr);
+    return isNaN(num) ? 0 : num;
+  }
+  function parseTerm() {
+    var result = parseFactor();
+    while (true) {
+      var op = peek();
+      if (op === "*" || op === "/") {
+        get();
+        var factor = parseFactor();
+        result = op === "*" ? result * factor : factor !== 0 ? result / factor : 0;
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+  function parseExpression() {
+    var result = parseTerm();
+    while (true) {
+      var op = peek();
+      if (op === "+" || op === "-") {
+        get();
+        var term = parseTerm();
+        result = op === "+" ? result + term : result - term;
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+  try {
+    var val = parseExpression();
+    return isNaN(val) ? 0 : val;
+  } catch (_unused) {
+    return 0;
+  }
+}
 function CssCalc() {
   this.calc = function (value) {
     if (value === undefined || typeof value !== "string") return value;
     return value.replace(calcRe, function (_, calc) {
-      try {
-        // eslint-disable-next-line
-        var calcFunc = new Function("return ".concat(calc));
-        var calcValue = calcFunc();
-        return calcValue;
-      } catch (_unused) {
-        return 0;
-      }
+      return safeEvalMath(calc);
     });
   };
   this.calcColor = function (value) {
     if (value === undefined || typeof value !== "string") return value;
     value = resolveColorMix(value);
+
+    // If the entire value is a single color (hex, rgb, hsl, oklch, lab), normalize to hex/rgba
+    var parsed = parseColor(value);
+    if (parsed) {
+      if (parsed.a === 1) {
+        return "#".concat(itohex(parsed.r)).concat(itohex(parsed.g)).concat(itohex(parsed.b));
+      }
+      var a = Math.round(parsed.a * 255);
+      return "#".concat(itohex(parsed.r)).concat(itohex(parsed.g)).concat(itohex(parsed.b)).concat(itohex(a));
+    }
     value = value.replace(colorRe1, function (_, r, g, b, a) {
       a = parseFloat(a);
       if (isNaN(a) || a >= 1) return "#".concat(itohex(r)).concat(itohex(g)).concat(itohex(b));

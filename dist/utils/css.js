@@ -1,16 +1,24 @@
 "use strict";
 
+function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.preprocessTailwindCss = preprocessTailwindCss;
-function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
-function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
+exports.parseStylesheetWithLightning = parseStylesheetWithLightning;
+var _lightningcss = require("lightningcss");
+var _helper = require("./helper");
+function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
+function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
+function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
+function _toPropertyKey(t) { var i = _toPrimitive(t, "string"); return "symbol" == _typeof(i) ? i : i + ""; }
+function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e = t[Symbol.toPrimitive]; if (void 0 !== e) { var i = e.call(t, r || "default"); if ("object" != _typeof(i)) return i; throw new TypeError("@@toPrimitive must return a primitive value."); } return ("string" === r ? String : Number)(t); }
+function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n = 0, F = function F() {}; return { s: F, n: function n() { return _n >= r.length ? { done: !0 } : { done: !1, value: r[_n++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0; } }
 function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length); for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e]; return n; }
-function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
-function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
-function flattenLayersAndSupports(cssStr) {
+/**
+ * Unwrap @layer and @supports blocks to expose standard CSS rules
+ */
+function flattenBlocks(cssStr) {
   var result = "";
   var i = 0;
   var len = cssStr.length;
@@ -46,58 +54,30 @@ function flattenLayersAndSupports(cssStr) {
       continue;
     }
 
-    // Check for @layer or @supports
+    // Check for at-rules
     if (cssStr[i] === "@") {
       var remaining = cssStr.substring(i);
-      var layerMatch = remaining.match(/^@layer\s+[^{]+\{/i);
-      var supportsMatch = remaining.match(/^@supports\s+[^{]+\{/i);
-      if (layerMatch || supportsMatch) {
-        var match = layerMatch || supportsMatch;
-        var matchStr = match[0];
+      var layerMatch = remaining.match(/^@(layer|supports|property)[^{]+\{/i);
+      if (layerMatch) {
+        if (layerMatch[1].toLowerCase() === "property") {
+          var _braceCount = 1;
+          var _j = i + layerMatch[0].length;
+          while (_j < len && _braceCount > 0) {
+            if (cssStr[_j] === "{") _braceCount++;else if (cssStr[_j] === "}") _braceCount--;
+            _j++;
+          }
+          i = _j;
+          continue;
+        }
         var braceCount = 1;
-        var j = i + matchStr.length;
+        var j = i + layerMatch[0].length;
         var innerContent = "";
         while (j < len && braceCount > 0) {
-          if (cssStr[j] === "/" && cssStr[j + 1] === "*") {
-            var _commentEnd = cssStr.indexOf("*/", j + 2);
-            if (_commentEnd === -1) {
-              innerContent += cssStr.substring(j);
-              j = len;
-              break;
-            }
-            innerContent += cssStr.substring(j, _commentEnd + 2);
-            j = _commentEnd + 2;
-            continue;
-          }
-          if (cssStr[j] === '"' || cssStr[j] === "'") {
-            var _char2 = cssStr[j];
-            var _strEnd = j + 1;
-            while (_strEnd < len) {
-              if (cssStr[_strEnd] === "\\") {
-                _strEnd += 2;
-              } else if (cssStr[_strEnd] === _char2) {
-                _strEnd++;
-                break;
-              } else {
-                _strEnd++;
-              }
-            }
-            innerContent += cssStr.substring(j, _strEnd);
-            j = _strEnd;
-            continue;
-          }
-          if (cssStr[j] === "{") {
-            braceCount++;
-          } else if (cssStr[j] === "}") {
-            braceCount--;
-          }
-          if (braceCount > 0) {
-            innerContent += cssStr[j];
-          }
+          if (cssStr[j] === "{") braceCount++;else if (cssStr[j] === "}") braceCount--;
+          if (braceCount > 0) innerContent += cssStr[j];
           j++;
         }
-        var flattenedInner = flattenLayersAndSupports(innerContent);
-        result += flattenedInner;
+        result += flattenBlocks(innerContent);
         i = j;
         continue;
       }
@@ -107,133 +87,174 @@ function flattenLayersAndSupports(cssStr) {
   }
   return result;
 }
-function convertRangeMediaQueries(cssStr) {
-  var result = cssStr.replace(/\(\s*width\s*>=\s*([^)]+)\)/gi, "(min-width: $1)");
-  result = result.replace(/\(\s*width\s*>\s*([^)]+)\)/gi, "(min-width: $1)");
-  result = result.replace(/\(\s*width\s*<=\s*([^)]+)\)/gi, "(max-width: $1)");
-  result = result.replace(/\(\s*width\s*<\s*([^)]+)\)/gi, "(max-width: $1)");
-  return result;
-}
-function simplifyDoubleSelectors(cssStr) {
-  return cssStr.replace(/(\.[a-z0-9_\\\-:]+)\1/gi, "$1");
-}
-function linearToSrgb(c) {
-  return c > 0.0031308 ? 1.055 * Math.pow(c, 1 / 2.4) - 0.055 : 12.92 * c;
-}
-function oklchToRgb(l, c, h) {
-  var hRad = h * Math.PI / 180;
-  var a = c * Math.cos(hRad);
-  var b = c * Math.sin(hRad);
-  var l_ = l + 0.3963377774 * a + 0.2158037573 * b;
-  var m_ = l - 0.1055613458 * a - 0.0638541728 * b;
-  var s_ = l - 0.0894841775 * a - 1.291485548 * b;
-  var l3 = l_ * l_ * l_;
-  var m3 = m_ * m_ * m_;
-  var s3 = s_ * s_ * s_;
-  var r = +4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3;
-  var g = -1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3;
-  var b_rgb = -0.0041960863 * l3 - 0.7034186147 * m3 + 1.707614701 * s3;
-  r = linearToSrgb(r);
-  g = linearToSrgb(g);
-  b_rgb = linearToSrgb(b_rgb);
-  r = Math.max(0, Math.min(255, Math.round(r * 255)));
-  g = Math.max(0, Math.min(255, Math.round(g * 255)));
-  b_rgb = Math.max(0, Math.min(255, Math.round(b_rgb * 255)));
-  return {
-    r: r,
-    g: g,
-    b: b_rgb
-  };
-}
-function convertOklchToRgbOrHex(cssStr) {
-  var oklchRegex = /oklch\(\s*([\d.]+%?)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)/gi;
-  return cssStr.replace(oklchRegex, function (match, lStr, cStr, hStr, aStr) {
-    var l = parseFloat(lStr);
-    if (lStr.includes("%")) {
-      l = l / 100;
-    }
-    var c = parseFloat(cStr);
-    var h = parseFloat(hStr);
-    var _oklchToRgb = oklchToRgb(l, c, h),
-      r = _oklchToRgb.r,
-      g = _oklchToRgb.g,
-      b = _oklchToRgb.b;
-    if (aStr) {
-      var a = parseFloat(aStr);
-      if (aStr.includes("%")) {
-        a = a / 100;
-      }
-      return "rgba(".concat(r, ", ").concat(g, ", ").concat(b, ", ").concat(a, ")");
-    }
-    return "#" + [r, g, b].map(function (x) {
-      return x.toString(16).padStart(2, "0");
-    }).join("");
+
+/**
+ * Parse and lower modern CSS using LightningCSS (Rust-based engine)
+ * Handles OKLCH, color-mix, CSS nesting, @layer, and @media range queries
+ */
+function parseStylesheetWithLightning(rawCss) {
+  var transformed = (0, _lightningcss.transform)({
+    filename: "input.css",
+    code: Buffer.from(rawCss),
+    targets: {
+      safari: 14 << 16
+    },
+    minify: false
   });
-}
-function removeContainerClass(cssStr) {
-  var index = cssStr.indexOf(".container {");
-  if (index === -1) return cssStr;
-  var braceCount = 1;
-  var j = index + ".container {".length;
-  while (j < cssStr.length && braceCount > 0) {
-    if (cssStr[j] === "{") {
-      braceCount++;
-    } else if (cssStr[j] === "}") {
-      braceCount--;
+  var cssText = flattenBlocks(transformed.code.toString());
+  var rawStylesheet = {};
+  var cleanSelector = function cleanSelector(sel) {
+    if (sel.includes(":root")) return [":root"];
+    var s = sel.trim();
+    if (!s.startsWith(".")) return [];
+
+    // Strip leading dot
+    s = s.slice(1);
+
+    // Extract class name (handling escaped chars like active\:scale-95, w-\[48\%\], etc.)
+    var classPart = "";
+    var i = 0;
+    while (i < s.length) {
+      if (s[i] === "\\") {
+        if (i + 1 < s.length) {
+          classPart += s[i + 1];
+          i += 2;
+          continue;
+        }
+      }
+      if (s[i] === ":" || s[i] === " " || s[i] === ">" || s[i] === "~" || s[i] === "+") {
+        break;
+      }
+      classPart += s[i];
+      i++;
     }
-    j++;
-  }
-  return cssStr.substring(0, index) + cssStr.substring(j);
-}
-function extractPropertiesAndInjectToRoot(cssStr) {
-  var properties = {};
-  var propertyRegex = /@property\s+(--[a-zA-Z0-9_-]+)\s*\{([\s\S]*?)\}/g;
-  var match;
-  while ((match = propertyRegex.exec(cssStr)) !== null) {
-    var name = match[1];
-    var body = match[2];
-    var valMatch = body.match(/initial-value:\s*([^;]+);/);
-    if (valMatch) {
-      properties[name] = valMatch[1].trim();
+    if (!classPart) return [];
+    var names = [classPart];
+
+    // For variants like disabled:bg-navy-300 or active:opacity-80, also register the base class name
+    if (classPart.startsWith("disabled:") || classPart.startsWith("active:") || classPart.startsWith("pressed:")) {
+      var base = classPart.replace(/^(disabled|active|pressed):/, "");
+      if (base && !names.includes(base)) {
+        names.push(base);
+      }
     }
-  }
-  var rootRegex = /(:root|:root\s*,\s*:host)\s*\{/g;
-  var rootMatch = rootRegex.exec(cssStr);
-  if (rootMatch) {
-    var insertIndex = rootMatch.index + rootMatch[0].length;
-    var injectedProps = "\n";
-    for (var _i = 0, _Object$entries = Object.entries(properties); _i < _Object$entries.length; _i++) {
-      var _Object$entries$_i = _slicedToArray(_Object$entries[_i], 2),
-        _name = _Object$entries$_i[0],
-        val = _Object$entries$_i[1];
-      injectedProps += "    ".concat(_name, ": ").concat(val, ";\n");
+    return names;
+  };
+  var parseDeclarations = function parseDeclarations(bodyText) {
+    var decls = {};
+    var parts = bodyText.split(";");
+    var _iterator = _createForOfIteratorHelper(parts),
+      _step;
+    try {
+      for (_iterator.s(); !(_step = _iterator.n()).done;) {
+        var part = _step.value;
+        var trimmed = part.trim();
+        if (!trimmed) continue;
+        var colonIdx = trimmed.indexOf(":");
+        if (colonIdx === -1) continue;
+        var prop = trimmed.slice(0, colonIdx).trim();
+        var val = trimmed.slice(colonIdx + 1).trim();
+        if (!prop || !val) continue;
+        if (prop.startsWith("--")) {
+          decls[prop] = val;
+        } else {
+          decls[(0, _helper.camelize)(prop)] = val;
+        }
+      }
+    } catch (err) {
+      _iterator.e(err);
+    } finally {
+      _iterator.f();
     }
-    return cssStr.substring(0, insertIndex) + injectedProps + cssStr.substring(insertIndex);
-  }
-  return cssStr;
-}
-function flattenNestedAmpersandRules(cssStr) {
-  var current = cssStr;
-  var prev;
-  var nestedRuleRe = /([^{}@][^{]*?)\s*\{\s*(&[^{]*?)\s*\{([^{}]*)\}\s*\}/g;
-  do {
-    prev = current;
-    current = current.replace(nestedRuleRe, function (_match, parentSelector, childSelector, declarations) {
-      var parent = parentSelector.trim();
-      var child = childSelector.trim();
-      var merged = child.replace(/&/g, parent);
-      return "".concat(merged, " {").concat(declarations, "}");
+    return decls;
+  };
+
+  // 1. Separate media query blocks
+  var mediaBlocks = [];
+  var noMediaCss = cssText.replace(/@media\s*([^{]+)\{([\s\S]+?\}\s*)\}/g, function (_, query, inner) {
+    mediaBlocks.push({
+      query: query.trim(),
+      inner: inner
     });
-  } while (current !== prev);
-  return current;
-}
-function preprocessTailwindCss(css) {
-  var preprocessedCss = extractPropertiesAndInjectToRoot(css);
-  preprocessedCss = flattenLayersAndSupports(preprocessedCss);
-  preprocessedCss = flattenNestedAmpersandRules(preprocessedCss);
-  preprocessedCss = removeContainerClass(preprocessedCss);
-  preprocessedCss = simplifyDoubleSelectors(preprocessedCss);
-  preprocessedCss = convertOklchToRgbOrHex(preprocessedCss);
-  preprocessedCss = convertRangeMediaQueries(preprocessedCss);
-  return preprocessedCss;
+    return "";
+  });
+
+  // 2. Parse regular rules
+  var ruleRe = /([^{}]+)\{([^{}]+)\}/g;
+  var match;
+  while ((match = ruleRe.exec(noMediaCss)) !== null) {
+    var rawSelectors = match[1].trim();
+    var body = match[2].trim();
+    if (rawSelectors.startsWith("@")) continue;
+    var selectors = rawSelectors.split(",").map(function (s) {
+      return s.trim();
+    });
+    var decls = parseDeclarations(body);
+    var _iterator2 = _createForOfIteratorHelper(selectors),
+      _step2;
+    try {
+      for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
+        var sel = _step2.value;
+        if (!sel.startsWith(".") && !sel.includes(":root")) continue;
+        var names = cleanSelector(sel);
+        var _iterator3 = _createForOfIteratorHelper(names),
+          _step3;
+        try {
+          for (_iterator3.s(); !(_step3 = _iterator3.n()).done;) {
+            var name = _step3.value;
+            rawStylesheet[name] = _objectSpread(_objectSpread({}, rawStylesheet[name]), decls);
+          }
+        } catch (err) {
+          _iterator3.e(err);
+        } finally {
+          _iterator3.f();
+        }
+      }
+    } catch (err) {
+      _iterator2.e(err);
+    } finally {
+      _iterator2.f();
+    }
+  }
+
+  // 3. Parse media query rules
+  for (var _i = 0, _mediaBlocks = mediaBlocks; _i < _mediaBlocks.length; _i++) {
+    var mb = _mediaBlocks[_i];
+    var mMatch = void 0;
+    var mRuleRe = /([^{}]+)\{([^{}]+)\}/g;
+    while ((mMatch = mRuleRe.exec(mb.inner)) !== null) {
+      var _rawSelectors = mMatch[1].trim();
+      var _body = mMatch[2].trim();
+      var _selectors = _rawSelectors.split(",").map(function (s) {
+        return s.trim();
+      });
+      var _decls = parseDeclarations(_body);
+      var _iterator4 = _createForOfIteratorHelper(_selectors),
+        _step4;
+      try {
+        for (_iterator4.s(); !(_step4 = _iterator4.n()).done;) {
+          var _sel = _step4.value;
+          if (!_sel.startsWith(".") && !_sel.includes(":root")) continue;
+          var _names = cleanSelector(_sel);
+          var _iterator5 = _createForOfIteratorHelper(_names),
+            _step5;
+          try {
+            for (_iterator5.s(); !(_step5 = _iterator5.n()).done;) {
+              var _name = _step5.value;
+              rawStylesheet[_name] = _objectSpread(_objectSpread({}, rawStylesheet[_name]), {}, _defineProperty({}, "@media ".concat(mb.query), _decls));
+            }
+          } catch (err) {
+            _iterator5.e(err);
+          } finally {
+            _iterator5.f();
+          }
+        }
+      } catch (err) {
+        _iterator4.e(err);
+      } finally {
+        _iterator4.f();
+      }
+    }
+  }
+  return rawStylesheet;
 }
