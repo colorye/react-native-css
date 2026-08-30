@@ -20,6 +20,27 @@ const INHERIT_PROPERTIES = [
   "textTransform",
 ];
 
+const NUMERIC_INHERIT_PROPERTIES = ["fontSize", "lineHeight", "letterSpacing"];
+
+const toNumericIfPossible = (value) => {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return value;
+
+  const trimmed = value.trim();
+  if (trimmed === "") return value;
+
+  const pxMatch = /^([\d.]+)px$/.exec(trimmed);
+  if (pxMatch) return Number(pxMatch[1]);
+
+  const num = Number(trimmed);
+  return Number.isFinite(num) ? num : value;
+};
+
+const coerceNumericInheritValue = (property, value) => {
+  if (!NUMERIC_INHERIT_PROPERTIES.includes(property)) return value;
+  return toNumericIfPossible(value);
+};
+
 // ============================================================================
 // Singleton Helper Instances
 // ============================================================================
@@ -218,7 +239,7 @@ function getInheritStyle(declarations) {
   const inheritDeclarations = {};
   for (const key of INHERIT_PROPERTIES) {
     if (declarations[key] !== undefined) {
-      inheritDeclarations[key] = declarations[key];
+      inheritDeclarations[key] = coerceNumericInheritValue(key, declarations[key]);
     }
   }
 
@@ -258,7 +279,7 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
       inherited = {};
       for (const key of INHERIT_PROPERTIES) {
         if (flatInherit[key] !== undefined) {
-          inherited[key] = flatInherit[key];
+          inherited[key] = coerceNumericInheritValue(key, flatInherit[key]);
         }
       }
       if (Object.keys(inherited).length === 0) {

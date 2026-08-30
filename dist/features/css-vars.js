@@ -85,23 +85,60 @@ function CssVars() {
   this.injectVar = function (selector, value) {
     if (value === undefined) return value;
     var variables = _this.get(selector);
-    var _resolve = function resolve(val) {
+    var findTopLevelComma = function findTopLevelComma(str) {
+      var depth = 0;
+      for (var i = 0; i < str.length; i++) {
+        var _char = str[i];
+        if (_char === "(") depth++;else if (_char === ")") depth--;else if (_char === "," && depth === 0) return i;
+      }
+      return -1;
+    };
+    var _resolveValue = function resolveValue(val) {
       var seen = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : new Set();
       if (typeof val !== "string") return val;
-      return val.replace(/var\((--[^,)]+)(?:,\s*([^)]*))?\)/g, function (match, variableName, defaultValue) {
+      var result = val;
+      var hasVar = result.includes("var(");
+      while (hasVar) {
+        var start = result.indexOf("var(");
+        if (start === -1) break;
+        var depth = 0;
+        var end = -1;
+        for (var i = start + 3; i < result.length; i++) {
+          var _char2 = result[i];
+          if (_char2 === "(") {
+            depth++;
+          } else if (_char2 === ")") {
+            depth--;
+            if (depth === 0) {
+              end = i;
+              break;
+            }
+          }
+        }
+        if (end === -1) break;
+        var inner = result.slice(start + 4, end);
+        var commaIdx = findTopLevelComma(inner);
+        var variableName = (commaIdx === -1 ? inner : inner.slice(0, commaIdx)).trim();
+        var defaultValue = commaIdx === -1 ? undefined : inner.slice(commaIdx + 1).trim();
+        var resolved = void 0;
         if (seen.has(variableName)) {
-          return defaultValue !== undefined ? defaultValue : DEFAULT_VARIABLE_VALUE;
+          resolved = defaultValue !== undefined ? _resolveValue(defaultValue, seen) : DEFAULT_VARIABLE_VALUE;
+        } else {
+          seen.add(variableName);
+          var resolvedVal = variables[variableName];
+          if (resolvedVal === undefined || resolvedVal === "initial") {
+            resolved = defaultValue !== undefined ? _resolveValue(defaultValue, seen) : DEFAULT_VARIABLE_VALUE;
+          } else {
+            resolved = _resolveValue(resolvedVal, seen);
+          }
         }
-        seen.add(variableName);
-        var resolvedVal = variables[variableName];
-        if (resolvedVal === undefined || resolvedVal === "initial") {
-          return defaultValue !== undefined ? defaultValue : DEFAULT_VARIABLE_VALUE;
-        }
-        return _resolve(resolvedVal, seen);
-      });
+        result = result.slice(0, start) + String(resolved) + result.slice(end + 1);
+        hasVar = result.includes("var(");
+        seen = new Set();
+      }
+      return result;
     };
-    var resolved = _resolve(value);
-    return resolved;
+    return _resolveValue(value);
   };
   return this;
 }

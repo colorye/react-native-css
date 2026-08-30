@@ -1,5 +1,20 @@
 const UNSUPPORTED_PROPERTIES = ["outline"];
 const remOrEmUnitRe = /([\d.]+)(?:rem|em)\b/g;
+const NUMERIC_TYPOGRAPHY_PROPERTIES = ["fontSize", "lineHeight", "letterSpacing"];
+
+const toNumericIfPossible = (value) => {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return value;
+
+  const trimmed = value.trim();
+  if (trimmed === "") return value;
+
+  const pxMatch = /^([\d.]+)px$/.exec(trimmed);
+  if (pxMatch) return Number(pxMatch[1]);
+
+  const num = Number(trimmed);
+  return Number.isFinite(num) ? num : value;
+};
 
 export default function CssTransform() {
   this.transformUnsafeValue = (property, value) => {
@@ -45,7 +60,8 @@ export default function CssTransform() {
 
   this.removeUnit = (value) => {
     if (value === undefined || typeof value !== "string") return value;
-    return value.replace(/px/g, "");
+    const withoutPx = value.replace(/px/g, "");
+    return toNumericIfPossible(withoutPx);
   };
 
   this.isPropertySupported = (property, value) => {
@@ -221,18 +237,17 @@ export default function CssTransform() {
   };
 
   this.transformFontScaling = (property, value, { width, roundFn }) => {
-    if (!["fontSize", "lineHeight"].includes(property)) return value;
+    if (!NUMERIC_TYPOGRAPHY_PROPERTIES.includes(property)) return value;
+
+    value = toNumericIfPossible(value);
+    if (typeof value !== "number") return value;
 
     // Base width for design (iPhone 6/7/8)
     const baseWidth = 375;
 
     // Calculate scaling factor based on device width
     const scaleFactor = width ? width / baseWidth : 1;
-    if (!isNaN(value)) {
-      return roundFn(Number(value) * scaleFactor);
-    }
-
-    return value;
+    return roundFn(value * scaleFactor);
   };
 
   this.transformLogicalProperty = (property, value) => {
@@ -405,6 +420,10 @@ export default function CssTransform() {
 
     if (["transform"].includes(property)) {
       return this.transformTransform(property, value);
+    }
+
+    if (NUMERIC_TYPOGRAPHY_PROPERTIES.includes(property)) {
+      return { [property]: toNumericIfPossible(value) };
     }
 
     return { [property]: isNaN(value) ? value : Number(value) };

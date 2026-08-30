@@ -12,6 +12,7 @@ import {
 } from "./utils/babel.js";
 
 const libRoot = nodePath.dirname(__filename);
+const RUNTIME_MODULE = nodePath.join(libRoot, "transformer-runtime.js");
 
 // Cache for loaded stylesheets
 const stylesheetCache = new Map();
@@ -104,7 +105,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral(RUNTIME_MODULE),
                   ]),
                   t.identifier("default"),
                 ),
@@ -120,7 +121,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral(RUNTIME_MODULE),
                   ]),
                   t.identifier("default"),
                 ),
@@ -136,7 +137,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral(RUNTIME_MODULE),
                   ]),
                   t.identifier("default"),
                 ),

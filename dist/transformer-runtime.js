@@ -27,6 +27,21 @@ function _toPrimitive(t, r) { if ("object" != _typeof(t) || !t) return t; var e 
 // Constants
 // ============================================================================
 var INHERIT_PROPERTIES = ["color", "fontFamily", "fontSize", "fontStyle", "fontWeight", "fontVariant", "letterSpacing", "lineHeight", "textAlign", "textTransform"];
+var NUMERIC_INHERIT_PROPERTIES = ["fontSize", "lineHeight", "letterSpacing"];
+var toNumericIfPossible = function toNumericIfPossible(value) {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return value;
+  var trimmed = value.trim();
+  if (trimmed === "") return value;
+  var pxMatch = /^([\d.]+)px$/.exec(trimmed);
+  if (pxMatch) return Number(pxMatch[1]);
+  var num = Number(trimmed);
+  return Number.isFinite(num) ? num : value;
+};
+var coerceNumericInheritValue = function coerceNumericInheritValue(property, value) {
+  if (!NUMERIC_INHERIT_PROPERTIES.includes(property)) return value;
+  return toNumericIfPossible(value);
+};
 
 // ============================================================================
 // Singleton Helper Instances
@@ -231,7 +246,7 @@ function getInheritStyle(declarations) {
     for (_iterator.s(); !(_step = _iterator.n()).done;) {
       var key = _step.value;
       if (declarations[key] !== undefined) {
-        inheritDeclarations[key] = declarations[key];
+        inheritDeclarations[key] = coerceNumericInheritValue(key, declarations[key]);
       }
     }
   } catch (err) {
@@ -279,7 +294,7 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
         for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
           var key = _step2.value;
           if (flatInherit[key] !== undefined) {
-            inherited[key] = flatInherit[key];
+            inherited[key] = coerceNumericInheritValue(key, flatInherit[key]);
           }
         }
       } catch (err) {

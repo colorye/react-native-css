@@ -9,6 +9,7 @@ var _path = _interopRequireDefault(require("path"));
 var _babel = require("./utils/babel.js");
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 var libRoot = _path["default"].dirname(__filename);
+var RUNTIME_MODULE = _path["default"].join(libRoot, "transformer-runtime.js");
 
 // Cache for loaded stylesheets
 var stylesheetCache = new Map();
@@ -90,11 +91,11 @@ function _default(_ref) {
           state.stylesheetId = path.scope.generateUidIdentifier();
           state.stylesheet = t.variableDeclaration("var", [t.variableDeclarator(state.stylesheetId, t.callExpression(t.identifier("require"), [t.stringLiteral(options.css)]))]);
           state.getStyleId = path.scope.generateUidIdentifier();
-          state.getStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getStyle")))]);
+          state.getStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(RUNTIME_MODULE)]), t.identifier("default")), t.identifier("getStyle")))]);
           state.getInheritStyleId = path.scope.generateUidIdentifier();
-          state.getInheritStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getInheritStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getInheritStyle")))]);
+          state.getInheritStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getInheritStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(RUNTIME_MODULE)]), t.identifier("default")), t.identifier("getInheritStyle")))]);
           state.mergeStylesId = path.scope.generateUidIdentifier();
-          state.mergeStyles = t.variableDeclaration("var", [t.variableDeclarator(state.mergeStylesId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("mergeStyles")))]);
+          state.mergeStyles = t.variableDeclaration("var", [t.variableDeclarator(state.mergeStylesId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(RUNTIME_MODULE)]), t.identifier("default")), t.identifier("mergeStyles")))]);
         },
         exit: function exit(path, state) {
           if (!state.enabled) return;
