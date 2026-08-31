@@ -36,25 +36,28 @@ export function transform({ src, filename, options }) {
   const projectRoot = options && options.projectRoot ? options.projectRoot : process.cwd();
 
   const resolveTransformer = (() => {
-    const resolveOptions = { paths: [projectRoot] };
     try {
-      return require(require.resolve("@expo/metro-config/babel-transformer", resolveOptions));
-    } catch (error) {
+      return require("@expo/metro-config/babel-transformer");
+    } catch {
       try {
-        return require(require.resolve("@react-native/metro-babel-transformer", resolveOptions));
-      } catch (error2) {
+        return require("@react-native/metro-babel-transformer");
+      } catch {
         try {
-          return require(require.resolve("metro-react-native-babel-transformer", resolveOptions));
-        } catch (err) {
+          return require("metro-react-native-babel-transformer");
+        } catch {
+          const resolveOptions = { paths: [projectRoot] };
           try {
-            return require("@expo/metro-config/babel-transformer");
-          } catch (e) {
+            const resolved = require.resolve("@expo/metro-config/babel-transformer", resolveOptions);
+            return eval("require")(resolved);
+          } catch {
             try {
-              return require("@react-native/metro-babel-transformer");
-            } catch (e2) {
+              const resolved = require.resolve("@react-native/metro-babel-transformer", resolveOptions);
+              return eval("require")(resolved);
+            } catch {
               try {
-                return require("metro-react-native-babel-transformer");
-              } catch (e3) {
+                const resolved = require.resolve("metro-react-native-babel-transformer", resolveOptions);
+                return eval("require")(resolved);
+              } catch {
                 throw new Error(
                   "Failed to load any upstream babel-transformer. Please ensure either '@expo/metro-config', '@react-native/metro-babel-transformer', or 'metro-react-native-babel-transformer' is installed.",
                 );

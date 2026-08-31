@@ -26,7 +26,27 @@ function loadStylesheet(cssPath, fileDir) {
   }
 
   try {
-    // 1. Try fileDir if provided
+    const cwd = process.cwd();
+    const cleanPath = cssPath.replace(/^@\//, "");
+
+    // 1. Try project root relative paths
+    const projectRootJson = nodePath.resolve(cwd, cleanPath.endsWith(".json") ? cleanPath : `${cleanPath}.json`);
+    if (fs.existsSync(projectRootJson)) {
+      const content = fs.readFileSync(projectRootJson, "utf-8");
+      const stylesheet = JSON.parse(content);
+      stylesheetCache.set(cssPath, stylesheet);
+      return stylesheet;
+    }
+
+    const defaultIndexJson = nodePath.resolve(cwd, "index.css.json");
+    if (fs.existsSync(defaultIndexJson)) {
+      const content = fs.readFileSync(defaultIndexJson, "utf-8");
+      const stylesheet = JSON.parse(content);
+      stylesheetCache.set(cssPath, stylesheet);
+      return stylesheet;
+    }
+
+    // 2. Try fileDir if provided
     if (fileDir) {
       const localJson = nodePath.resolve(fileDir, cssPath);
       if (fs.existsSync(localJson)) {
@@ -37,7 +57,18 @@ function loadStylesheet(cssPath, fileDir) {
       }
     }
 
-    // 2. Try the exported-stylesheet.json from lib directory
+    // 3. Try resolving the module if it's a module specifier like @colorye/react-native-css/exported-stylesheet.json
+    try {
+      const resolvedModule = require.resolve(cssPath, { paths: [cwd, libRoot] });
+      if (fs.existsSync(resolvedModule)) {
+        const content = fs.readFileSync(resolvedModule, "utf-8");
+        const stylesheet = JSON.parse(content);
+        stylesheetCache.set(cssPath, stylesheet);
+        return stylesheet;
+      }
+    } catch {}
+
+    // 4. Try the exported-stylesheet.json from lib directory
     const exportedPath = nodePath.join(libRoot, "exported-stylesheet.json");
     if (fs.existsSync(exportedPath)) {
       const content = fs.readFileSync(exportedPath, "utf-8");
@@ -46,7 +77,7 @@ function loadStylesheet(cssPath, fileDir) {
       return stylesheet;
     }
 
-    // 3. Try .json next to the CSS file
+    // 5. Try .json next to the CSS file
     const cssJsonPath = `${cssPath}.json`;
     if (fs.existsSync(cssJsonPath)) {
       const content = fs.readFileSync(cssJsonPath, "utf-8");
@@ -119,7 +150,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime"),
                   ]),
                   t.identifier("default"),
                 ),
@@ -135,7 +166,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime"),
                   ]),
                   t.identifier("default"),
                 ),
@@ -151,7 +182,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime"),
                   ]),
                   t.identifier("default"),
                 ),

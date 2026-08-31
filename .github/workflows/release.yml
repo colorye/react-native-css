@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing semver tag to publish from (e.g. v0.3.0). Use after fixing a failed publish."
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  checks:
+    name: Validate release ref & build
+    runs-on: self-hosted
+    outputs:
+      release_tag: ${{ steps.meta.outputs.release_tag }}
+      checkout_ref: ${{ steps.meta.outputs.checkout_ref }}
+    steps:
+      - name: Resolve ref and tag
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="${INPUT_TAG#refs/tags/}"
+            if [[ "$TAG" != v* ]]; then
+              TAG="v${TAG}"
+            fi
+            if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+.*$'; then
+              echo "Invalid tag format: $TAG"
+              exit 1
+            fi
+            CHECKOUT_REF="refs/tags/$TAG"
+          else
+            TAG="$REF_NAME"
+            CHECKOUT_REF="$REF"
+          fi
+          echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "checkout_ref=$CHECKOUT_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.meta.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: yarn
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: yarn install --immutable || yarn install
+
+      - name: Verify tag matches package.json version
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+        run: |
+          node <<'NODE'
+          const { readFileSync } = require('node:fs');
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const tag = process.env.RELEASE_TAG || '';
+          const fromTag = tag.startsWith('v') ? tag.slice(1) : tag;
+          if (pkg.version !== fromTag) {
+            console.error(
+              `Mismatch: package.json version is "${pkg.version}" but tag is "${tag}" (expected v${pkg.version}).`,
+            );
+            process.exit(1);
+          }
+          console.log('OK: tag', tag, 'matches package.json version', pkg.version);
+          NODE
+
+      - name: Run Tests
+        run: cargo test --manifest-path crates/transformer/Cargo.toml
+
+      - name: Build JS & Sync Types
+        run: yarn build:js
+
+  publish:
+    name: Publish to npm and GitHub Release
+    needs: checks
+    runs-on: self-hosted
+    environment: npm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.checks.outputs.checkout_ref }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: yarn install --immutable || yarn install
+
+      - name: Build Project
+        run: yarn build:js
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.checks.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists; skipping create (safe for re-runs)."
+          else
+            gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --generate-notes --verify-tag
+          fi

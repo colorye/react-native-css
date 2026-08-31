@@ -35,6 +35,10 @@ const toNumber = (value) => {
   if (typeof value !== "string") return value;
   const trimmed = value.trim();
   if (trimmed === "") return value;
+  // If it's a known string-only property like borderStyle or pure word, don't convert to number
+  if (/^(solid|dashed|dotted|none|hidden|double|groove|ridge|inset|outset)$/i.test(trimmed)) {
+    return trimmed;
+  }
   const num = Number(trimmed);
   return !isNaN(num) ? num : value;
 };
@@ -152,24 +156,23 @@ export function expandBorder(property, value) {
     return { [`${property}Width`]: 0 };
   }
 
-  // Try "width style color" format
-  let match = borderRe.exec(String(value));
+  const match = borderRe.exec(String(value));
   if (match) {
     const [, width, style, color] = match;
     return {
       [`${property}Width`]: toNumber(width),
-      [`${property}Style`]: style,
+      borderStyle: ["solid", "dotted", "dashed"].includes(style) ? style : "solid",
       [`${property}Color`]: color,
     };
   }
 
   // Try "width style" format
-  match = borderSimpleRe.exec(String(value));
-  if (match) {
-    const [, width, style] = match;
+  const simpleMatch = borderSimpleRe.exec(String(value));
+  if (simpleMatch) {
+    const [, width, style] = simpleMatch;
     return {
       [`${property}Width`]: toNumber(width),
-      [`${property}Style`]: style,
+      borderStyle: ["solid", "dotted", "dashed"].includes(style) ? style : "solid",
     };
   }
 
@@ -434,15 +437,24 @@ export function precomputeValue(property, value) {
   // Get aliased property
   const aliasedProp = getAliasedProperty(property);
 
-  // For static values, remove px and convert to number
-  if (!isDynamic) {
-    processed = removePxUnit(processed);
-    if (typeof processed === "string") {
-      processed = toNumber(processed);
+    // For static values, remove px and convert to number (unless it's borderStyle, fontWeight, etc.)
+    if (!isDynamic) {
+      if (aliasedProp.endsWith("Style") || aliasedProp.endsWith("borderStyle") || aliasedProp === "borderStyle") {
+        processed = String(processed).trim() || "solid";
+      } else {
+        processed = removePxUnit(processed);
+        if (typeof processed === "string") {
+          processed = toNumber(processed);
+        }
+      }
     }
-  }
 
-  return { property: aliasedProp, value: processed, isDynamic };
+    // React Native does not support directional borderStyle properties (e.g. borderBottomStyle)
+    if (["borderBottomStyle", "borderTopStyle", "borderLeftStyle", "borderRightStyle"].includes(aliasedProp)) {
+      return { property: "borderStyle", value: processed === "dotted" || processed === "dashed" ? processed : "solid", isDynamic };
+    }
+
+    return { property: aliasedProp, value: processed, isDynamic };
 }
 
 /**

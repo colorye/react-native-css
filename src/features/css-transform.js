@@ -95,13 +95,14 @@ export default function CssTransform() {
     const transformed = {};
 
     if (width) {
-      transformed[`${property}Width`] = isNaN(width) ? width : Number(width);
+      const wStr = String(width).trim();
+      transformed[`${property}Width`] = wStr !== "" && !isNaN(Number(wStr)) ? Number(wStr) : width;
     } else {
       transformed[`${property}Width`] = 0;
     }
 
     if (style) {
-      transformed[`${property}Style`] = style;
+      transformed.borderStyle = ["solid", "dotted", "dashed"].includes(style) ? style : "solid";
     }
 
     if (color) {
@@ -140,7 +141,10 @@ export default function CssTransform() {
     const cleanedParts = parts.filter(Boolean);
 
     const toNumberOrString = (val) => {
-      return isNaN(val) ? val : Number(val);
+      if (typeof val === "string" && val.trim() !== "" && !isNaN(Number(val))) {
+        return Number(val);
+      }
+      return val;
     };
 
     const transformed = {};
@@ -208,10 +212,13 @@ export default function CssTransform() {
       const [, token, val1, val2] = match;
 
       if (["translate", "skew"].includes(token)) {
-        transforms.push({ [`${token}X`]: isNaN(val1) ? val1 : Number(val1) });
-        transforms.push({ [`${token}Y`]: isNaN(val2) ? val2 : Number(val2) });
+        const v1 = String(val1).trim();
+        const v2 = String(val2).trim();
+        transforms.push({ [`${token}X`]: v1 !== "" && !isNaN(Number(v1)) ? Number(v1) : val1 });
+        transforms.push({ [`${token}Y`]: v2 !== "" && !isNaN(Number(v2)) ? Number(v2) : val2 });
       } else {
-        transforms.push({ [token]: isNaN(val1) ? val1 : Number(val1) });
+        const v1 = String(val1).trim();
+        transforms.push({ [token]: v1 !== "" && !isNaN(Number(v1)) ? Number(v1) : val1 });
       }
     } while (match);
 
@@ -228,8 +235,10 @@ export default function CssTransform() {
 
     // Calculate scaling factor based on device width
     const scaleFactor = width ? width / baseWidth : 1;
-    if (!isNaN(value)) {
+    if (typeof value === "string" && value.trim() !== "" && !isNaN(Number(value))) {
       return roundFn(Number(value) * scaleFactor);
+    } else if (typeof value === "number") {
+      return roundFn(value * scaleFactor);
     }
 
     return value;
@@ -264,7 +273,10 @@ export default function CssTransform() {
     const cleanedParts = parts.filter(Boolean);
 
     const toNumberOrString = (val) => {
-      return isNaN(val) ? val : Number(val);
+      if (typeof val === "string" && val.trim() !== "" && !isNaN(Number(val))) {
+        return Number(val);
+      }
+      return val;
     };
 
     if (property === "paddingInlineStart") return { paddingStart: toNumberOrString(value) };

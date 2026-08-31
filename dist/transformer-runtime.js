@@ -142,6 +142,21 @@ function getFlattenStyle(declarations) {
   for (var i = 0; i < declarations.length; i++) {
     merge(declarations[i]);
   }
+  var borderStyles = ["borderBottomStyle", "borderTopStyle", "borderLeftStyle", "borderRightStyle"];
+  for (var _i = 0, _borderStyles = borderStyles; _i < _borderStyles.length; _i++) {
+    var bs = _borderStyles[_i];
+    if (result[bs] !== undefined) {
+      if (result.borderStyle === undefined) {
+        result.borderStyle = ["solid", "dotted", "dashed"].includes(result[bs]) ? result[bs] : "solid";
+      }
+      delete result[bs];
+    }
+  }
+  if (result.borderStyle !== undefined) {
+    if (typeof result.borderStyle !== "string" || !["solid", "dotted", "dashed"].includes(result.borderStyle)) {
+      delete result.borderStyle;
+    }
+  }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 

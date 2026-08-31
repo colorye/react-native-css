@@ -21,36 +21,68 @@ function loadStylesheet(cssPath, fileDir) {
     return stylesheetCache.get(cssPath);
   }
   try {
-    // 1. Try fileDir if provided
-    if (fileDir) {
-      var localJson = _path["default"].resolve(fileDir, cssPath);
-      if (_fs["default"].existsSync(localJson)) {
-        var content = _fs["default"].readFileSync(localJson, "utf-8");
-        var stylesheet = JSON.parse(content);
-        stylesheetCache.set(cssPath, stylesheet);
-        return stylesheet;
-      }
-    }
+    var cwd = process.cwd();
+    var cleanPath = cssPath.replace(/^@\//, "");
 
-    // 2. Try the exported-stylesheet.json from lib directory
-    var exportedPath = _path["default"].join(libRoot, "exported-stylesheet.json");
-    if (_fs["default"].existsSync(exportedPath)) {
-      var _content = _fs["default"].readFileSync(exportedPath, "utf-8");
+    // 1. Try project root relative paths
+    var projectRootJson = _path["default"].resolve(cwd, cleanPath.endsWith(".json") ? cleanPath : "".concat(cleanPath, ".json"));
+    if (_fs["default"].existsSync(projectRootJson)) {
+      var content = _fs["default"].readFileSync(projectRootJson, "utf-8");
+      var stylesheet = JSON.parse(content);
+      stylesheetCache.set(cssPath, stylesheet);
+      return stylesheet;
+    }
+    var defaultIndexJson = _path["default"].resolve(cwd, "index.css.json");
+    if (_fs["default"].existsSync(defaultIndexJson)) {
+      var _content = _fs["default"].readFileSync(defaultIndexJson, "utf-8");
       var _stylesheet = JSON.parse(_content);
       stylesheetCache.set(cssPath, _stylesheet);
       return _stylesheet;
     }
 
-    // 3. Try .json next to the CSS file
+    // 2. Try fileDir if provided
+    if (fileDir) {
+      var localJson = _path["default"].resolve(fileDir, cssPath);
+      if (_fs["default"].existsSync(localJson)) {
+        var _content2 = _fs["default"].readFileSync(localJson, "utf-8");
+        var _stylesheet2 = JSON.parse(_content2);
+        stylesheetCache.set(cssPath, _stylesheet2);
+        return _stylesheet2;
+      }
+    }
+
+    // 3. Try resolving the module if it's a module specifier like @colorye/react-native-css/exported-stylesheet.json
+    try {
+      var resolvedModule = require.resolve(cssPath, {
+        paths: [cwd, libRoot]
+      });
+      if (_fs["default"].existsSync(resolvedModule)) {
+        var _content3 = _fs["default"].readFileSync(resolvedModule, "utf-8");
+        var _stylesheet3 = JSON.parse(_content3);
+        stylesheetCache.set(cssPath, _stylesheet3);
+        return _stylesheet3;
+      }
+    } catch (_unused) {}
+
+    // 4. Try the exported-stylesheet.json from lib directory
+    var exportedPath = _path["default"].join(libRoot, "exported-stylesheet.json");
+    if (_fs["default"].existsSync(exportedPath)) {
+      var _content4 = _fs["default"].readFileSync(exportedPath, "utf-8");
+      var _stylesheet4 = JSON.parse(_content4);
+      stylesheetCache.set(cssPath, _stylesheet4);
+      return _stylesheet4;
+    }
+
+    // 5. Try .json next to the CSS file
     var cssJsonPath = "".concat(cssPath, ".json");
     if (_fs["default"].existsSync(cssJsonPath)) {
-      var _content2 = _fs["default"].readFileSync(cssJsonPath, "utf-8");
-      var _stylesheet2 = JSON.parse(_content2);
-      stylesheetCache.set(cssPath, _stylesheet2);
-      return _stylesheet2;
+      var _content5 = _fs["default"].readFileSync(cssJsonPath, "utf-8");
+      var _stylesheet5 = JSON.parse(_content5);
+      stylesheetCache.set(cssPath, _stylesheet5);
+      return _stylesheet5;
     }
     return null;
-  } catch (_unused) {
+  } catch (_unused2) {
     return null;
   }
 }
@@ -101,11 +133,11 @@ function _default(_ref) {
           state.stylesheetId = path.scope.generateUidIdentifier();
           state.stylesheet = t.variableDeclaration("var", [t.variableDeclarator(state.stylesheetId, t.callExpression(t.identifier("require"), [t.stringLiteral(options.css)]))]);
           state.getStyleId = path.scope.generateUidIdentifier();
-          state.getStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getStyle")))]);
+          state.getStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime")]), t.identifier("default")), t.identifier("getStyle")))]);
           state.getInheritStyleId = path.scope.generateUidIdentifier();
-          state.getInheritStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getInheritStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getInheritStyle")))]);
+          state.getInheritStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getInheritStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime")]), t.identifier("default")), t.identifier("getInheritStyle")))]);
           state.mergeStylesId = path.scope.generateUidIdentifier();
-          state.mergeStyles = t.variableDeclaration("var", [t.variableDeclarator(state.mergeStylesId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("mergeStyles")))]);
+          state.mergeStyles = t.variableDeclaration("var", [t.variableDeclarator(state.mergeStylesId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime")]), t.identifier("default")), t.identifier("mergeStyles")))]);
         },
         exit: function exit(path, state) {
           if (!state.enabled) return;

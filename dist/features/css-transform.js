@@ -102,12 +102,13 @@ function CssTransform() {
       color = _ref4[3];
     var transformed = {};
     if (width) {
-      transformed["".concat(property, "Width")] = isNaN(width) ? width : Number(width);
+      var wStr = String(width).trim();
+      transformed["".concat(property, "Width")] = wStr !== "" && !isNaN(Number(wStr)) ? Number(wStr) : width;
     } else {
       transformed["".concat(property, "Width")] = 0;
     }
     if (style) {
-      transformed["".concat(property, "Style")] = style;
+      transformed.borderStyle = ["solid", "dotted", "dashed"].includes(style) ? style : "solid";
     }
     if (color) {
       transformed["".concat(property, "Color")] = color;
@@ -141,7 +142,10 @@ function CssTransform() {
     }
     var cleanedParts = parts.filter(Boolean);
     var toNumberOrString = function toNumberOrString(val) {
-      return isNaN(val) ? val : Number(val);
+      if (typeof val === "string" && val.trim() !== "" && !isNaN(Number(val))) {
+        return Number(val);
+      }
+      return val;
     };
     var transformed = {};
     if (cleanedParts.length === 0) {
@@ -201,10 +205,13 @@ function CssTransform() {
         val1 = _match2[2],
         val2 = _match2[3];
       if (["translate", "skew"].includes(token)) {
-        transforms.push(_defineProperty({}, "".concat(token, "X"), isNaN(val1) ? val1 : Number(val1)));
-        transforms.push(_defineProperty({}, "".concat(token, "Y"), isNaN(val2) ? val2 : Number(val2)));
+        var v1 = String(val1).trim();
+        var v2 = String(val2).trim();
+        transforms.push(_defineProperty({}, "".concat(token, "X"), v1 !== "" && !isNaN(Number(v1)) ? Number(v1) : val1));
+        transforms.push(_defineProperty({}, "".concat(token, "Y"), v2 !== "" && !isNaN(Number(v2)) ? Number(v2) : val2));
       } else {
-        transforms.push(_defineProperty({}, token, isNaN(val1) ? val1 : Number(val1)));
+        var _v = String(val1).trim();
+        transforms.push(_defineProperty({}, token, _v !== "" && !isNaN(Number(_v)) ? Number(_v) : val1));
       }
     } while (match);
     return _defineProperty({}, property, transforms);
@@ -219,8 +226,10 @@ function CssTransform() {
 
     // Calculate scaling factor based on device width
     var scaleFactor = width ? width / baseWidth : 1;
-    if (!isNaN(value)) {
+    if (typeof value === "string" && value.trim() !== "" && !isNaN(Number(value))) {
       return roundFn(Number(value) * scaleFactor);
+    } else if (typeof value === "number") {
+      return roundFn(value * scaleFactor);
     }
     return value;
   };
@@ -251,7 +260,10 @@ function CssTransform() {
     }
     var cleanedParts = parts.filter(Boolean);
     var toNumberOrString = function toNumberOrString(val) {
-      return isNaN(val) ? val : Number(val);
+      if (typeof val === "string" && val.trim() !== "" && !isNaN(Number(val))) {
+        return Number(val);
+      }
+      return val;
     };
     if (property === "paddingInlineStart") return {
       paddingStart: toNumberOrString(value)

@@ -83,6 +83,11 @@ impl StylesheetIndex {
                     if let Some(s) = v.as_str() {
                         local_vars.insert(k.clone(), s.to_string());
                     }
+                } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
+                    // React Native only supports global borderStyle ("solid" | "dotted" | "dashed")
+                    let s_val = v.as_str().unwrap_or("solid");
+                    let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid" };
+                    prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
                 } else {
                     prop_map.insert(k.clone(), v.clone());
                 }
@@ -97,9 +102,15 @@ impl StylesheetIndex {
                         let resolved = self.resolve_css_value(str_val, k, &local_vars);
                         if k == "scale" {
                             prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": resolved }]));
+                        } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
+                            let s_val = resolved.as_str().unwrap_or("solid").to_string();
+                            let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid".to_string() };
+                            prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
                         } else {
                             prop_map.insert(k.clone(), resolved);
                         }
+                    } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
+                        prop_map.insert("borderStyle".to_string(), serde_json::json!("solid"));
                     } else {
                         prop_map.insert(k.clone(), v.clone());
                     }
@@ -112,9 +123,15 @@ impl StylesheetIndex {
                         let resolved = self.resolve_css_value(str_val, k, &local_vars);
                         if k == "scale" {
                             prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": resolved }]));
+                        } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
+                            let s_val = resolved.as_str().unwrap_or("solid").to_string();
+                            let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid".to_string() };
+                            prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
                         } else {
                             prop_map.insert(k.clone(), resolved);
                         }
+                    } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
+                        prop_map.insert("borderStyle".to_string(), serde_json::json!("solid"));
                     } else {
                         prop_map.insert(k.clone(), v.clone());
                     }
@@ -188,7 +205,23 @@ impl StylesheetIndex {
     /// Resolve unit (rem -> px, px, calc evaluation, React Native specific conversions)
     fn resolve_css_value(&self, input: &str, property: &str, local_vars: &HashMap<String, String>) -> JsonValue {
         let after_vars = self.resolve_vars(input, local_vars);
-        let trimmed = after_vars.trim();
+        let trimmed_raw = after_vars.trim();
+
+        let cleaned_box_shadow;
+        let trimmed = if property == "boxShadow" {
+            let parts: Vec<&str> = trimmed_raw
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if parts.is_empty() {
+                return serde_json::json!(null);
+            }
+            cleaned_box_shadow = parts.join(", ");
+            cleaned_box_shadow.as_str()
+        } else {
+            trimmed_raw
+        };
 
         // Handle React Native scale percentages e.g. "95%" -> 0.95
         if property == "scale" {
@@ -203,6 +236,12 @@ impl StylesheetIndex {
             }
         }
 
+        // Handle React Native borderStyle and fontWeight: must be strings! ("solid", "dashed", "dotted", "700", "400", etc.)
+        if property.ends_with("Style") || property.ends_with("borderStyle") || property == "borderStyle" {
+            let valid_style = if trimmed == "dotted" || trimmed == "dashed" { trimmed } else { "solid" };
+            return serde_json::json!(valid_style);
+        }
+
         // Handle React Native fontWeight: must be string "700", "400", etc.
         if property == "fontWeight" {
             let fw = trimmed.replace("px", "").replace("rem", "");
@@ -214,7 +253,12 @@ impl StylesheetIndex {
             return serde_json::json!(9999.0);
         }
 
-        // Handle lab(L% a b) / oklch(L C H) color functions for React Native
+        // Handle lab(L% a b) / oklch(L C H) / rgb(r g b / a) color functions for React Native
+        if (trimmed.starts_with("rgb(") || trimmed.starts_with("rgba(")) && trimmed.ends_with(')') {
+            if let Some(hex) = Self::rgb_to_hex(trimmed) {
+                return serde_json::json!(hex);
+            }
+        }
         if trimmed.starts_with("lab(") && trimmed.ends_with(')') {
             if let Some(hex) = Self::lab_to_hex(trimmed) {
                 return serde_json::json!(hex);
@@ -252,13 +296,73 @@ impl StylesheetIndex {
             }
         }
 
-        // 4. Handle pure numbers
-        if let Ok(num) = trimmed.parse::<f64>() {
-            return serde_json::json!(num);
+        // 4. Handle pure numbers (except for properties that MUST be string in React Native!)
+        if !property.ends_with("Style")
+            && !property.ends_with("borderStyle")
+            && property != "borderStyle"
+            && property != "fontFamily"
+            && property != "fontWeight"
+            && property != "color"
+            && !property.ends_with("Color")
+        {
+            if let Ok(num) = trimmed.parse::<f64>() {
+                return serde_json::json!(num);
+            }
         }
 
         // 5. Fallback to string (colors, flex direction, etc.)
         serde_json::json!(trimmed)
+    }
+
+    fn rgb_to_hex(color_str: &str) -> Option<String> {
+        let prefix_len = if color_str.starts_with("rgba(") { 5 } else { 4 };
+        let inner = color_str[prefix_len..color_str.len() - 1].trim();
+
+        // Handle slash syntax: "83 194 188 / 0.5" or "83, 194, 188 / 0.5"
+        let (rgb_part, alpha_part) = match inner.find('/') {
+            Some(idx) => (inner[..idx].trim(), Some(inner[idx + 1..].trim())),
+            None => (inner, None),
+        };
+
+        // Split by comma or whitespace
+        let components: Vec<&str> = if rgb_part.contains(',') {
+            rgb_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+        } else {
+            rgb_part.split_whitespace().collect()
+        };
+
+        if components.len() < 3 {
+            return None;
+        }
+
+        let r = components[0].parse::<f64>().ok()?.round().clamp(0.0, 255.0) as u8;
+        let g = components[1].parse::<f64>().ok()?.round().clamp(0.0, 255.0) as u8;
+        let b = components[2].parse::<f64>().ok()?.round().clamp(0.0, 255.0) as u8;
+
+        let alpha_str = if let Some(a_str) = alpha_part {
+            Some(a_str)
+        } else if components.len() > 3 {
+            Some(components[3])
+        } else {
+            None
+        };
+
+        if let Some(a_val_str) = alpha_str {
+            let a_num = if a_val_str.ends_with('%') {
+                a_val_str.trim_end_matches('%').parse::<f64>().ok()? / 100.0
+            } else {
+                a_val_str.parse::<f64>().ok()?
+            };
+
+            if (a_num - 1.0).abs() < f64::EPSILON {
+                Some(format!("#{:02x}{:02x}{:02x}", r, g, b))
+            } else {
+                let a_byte = (a_num * 255.0).round().clamp(0.0, 255.0) as u8;
+                Some(format!("#{:02x}{:02x}{:02x}{:02x}", r, g, b, a_byte))
+            }
+        } else {
+            Some(format!("#{:02x}{:02x}{:02x}", r, g, b))
+        }
     }
 
     fn lab_to_hex(color_str: &str) -> Option<String> {
@@ -504,6 +608,24 @@ impl StylesheetIndex {
                 for (k, v) in props {
                     merged.insert(k.clone(), v.clone());
                 }
+            }
+        }
+
+        // Clean up React Native specific style conflicts
+        // React Native only supports borderStyle ("solid" | "dotted" | "dashed") globally, NOT borderBottomStyle, borderTopStyle, etc.
+        // Remove individual directional border styles if present to prevent RCTView error
+        merged.remove("borderBottomStyle");
+        merged.remove("borderTopStyle");
+        merged.remove("borderLeftStyle");
+        merged.remove("borderRightStyle");
+
+        if let Some(bs) = merged.get_mut("borderStyle") {
+            if let Some(s) = bs.as_str() {
+                if s != "solid" && s != "dotted" && s != "dashed" {
+                    *bs = serde_json::json!("solid");
+                }
+            } else {
+                *bs = serde_json::json!("solid");
             }
         }
 

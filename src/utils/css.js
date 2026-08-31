@@ -44,9 +44,12 @@ function flattenBlocks(cssStr) {
     // Check for at-rules
     if (cssStr[i] === "@") {
       const remaining = cssStr.substring(i);
-      const layerMatch = remaining.match(/^@(layer|supports|property)[^{]+\{/i);
+      const layerMatch = remaining.match(/^@(layer|supports|property)[^{]*\{/i);
       if (layerMatch) {
-        if (layerMatch[1].toLowerCase() === "property") {
+        const layerType = layerMatch[1].toLowerCase();
+        // Skip @layer base entirely because React Native views should not inherit browser base resets (* { border: 0 solid; margin: 0 })
+        const isLayerBase = /^@layer\s+base\s*\{/i.test(layerMatch[0]);
+        if (layerType === "property" || isLayerBase) {
           let braceCount = 1;
           let j = i + layerMatch[0].length;
           while (j < len && braceCount > 0) {

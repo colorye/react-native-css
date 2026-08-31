@@ -21,6 +21,10 @@
   "dependencies": {
     "lightningcss": "^1.29.0"
   },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": "*"
+  },
   "files": [
     "dist",
     "src",

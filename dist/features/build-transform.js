@@ -67,6 +67,10 @@ var toNumber = function toNumber(value) {
   if (typeof value !== "string") return value;
   var trimmed = value.trim();
   if (trimmed === "") return value;
+  // If it's a known string-only property like borderStyle or pure word, don't convert to number
+  if (/^(solid|dashed|dotted|none|hidden|double|groove|ridge|inset|outset)$/i.test(trimmed)) {
+    return trimmed;
+  }
   var num = Number(trimmed);
   return !isNaN(num) ? num : value;
 };
@@ -182,26 +186,22 @@ function expandBorder(property, value) {
   if (value === "none" || value === "0") {
     return _defineProperty({}, "".concat(property, "Width"), 0);
   }
-
-  // Try "width style color" format
   var match = borderRe.exec(String(value));
   if (match) {
-    var _match = match,
-      _match2 = _slicedToArray(_match, 4),
-      width = _match2[1],
-      style = _match2[2],
-      color = _match2[3];
-    return _defineProperty(_defineProperty(_defineProperty({}, "".concat(property, "Width"), toNumber(width)), "".concat(property, "Style"), style), "".concat(property, "Color"), color);
+    var _match = _slicedToArray(match, 4),
+      width = _match[1],
+      style = _match[2],
+      color = _match[3];
+    return _defineProperty(_defineProperty(_defineProperty({}, "".concat(property, "Width"), toNumber(width)), "borderStyle", ["solid", "dotted", "dashed"].includes(style) ? style : "solid"), "".concat(property, "Color"), color);
   }
 
   // Try "width style" format
-  match = borderSimpleRe.exec(String(value));
-  if (match) {
-    var _match3 = match,
-      _match4 = _slicedToArray(_match3, 3),
-      _width = _match4[1],
-      _style = _match4[2];
-    return _defineProperty(_defineProperty({}, "".concat(property, "Width"), toNumber(_width)), "".concat(property, "Style"), _style);
+  var simpleMatch = borderSimpleRe.exec(String(value));
+  if (simpleMatch) {
+    var _simpleMatch = _slicedToArray(simpleMatch, 3),
+      _width = _simpleMatch[1],
+      _style = _simpleMatch[2];
+    return _defineProperty(_defineProperty({}, "".concat(property, "Width"), toNumber(_width)), "borderStyle", ["solid", "dotted", "dashed"].includes(_style) ? _style : "solid");
   }
 
   // Single value (width only)
@@ -274,11 +274,11 @@ function expandTransform(property, value) {
   var match;
   var re = new RegExp(transformFnRe.source, "g");
   while ((match = re.exec(value)) !== null) {
-    var _match5 = match,
-      _match6 = _slicedToArray(_match5, 4),
-      fn = _match6[1],
-      val1 = _match6[2],
-      val2 = _match6[3];
+    var _match2 = match,
+      _match3 = _slicedToArray(_match2, 4),
+      fn = _match3[1],
+      val1 = _match3[2],
+      val2 = _match3[3];
     if (fn === "translate" || fn === "skew") {
       transforms.push(_defineProperty({}, "".concat(fn, "X"), toNumber(val1)));
       if (val2 !== undefined) {
@@ -463,12 +463,25 @@ function precomputeValue(property, value) {
   // Get aliased property
   var aliasedProp = getAliasedProperty(property);
 
-  // For static values, remove px and convert to number
+  // For static values, remove px and convert to number (unless it's borderStyle, fontWeight, etc.)
   if (!isDynamic) {
-    processed = removePxUnit(processed);
-    if (typeof processed === "string") {
-      processed = toNumber(processed);
+    if (aliasedProp.endsWith("Style") || aliasedProp.endsWith("borderStyle") || aliasedProp === "borderStyle") {
+      processed = String(processed).trim() || "solid";
+    } else {
+      processed = removePxUnit(processed);
+      if (typeof processed === "string") {
+        processed = toNumber(processed);
+      }
     }
+  }
+
+  // React Native does not support directional borderStyle properties (e.g. borderBottomStyle)
+  if (["borderBottomStyle", "borderTopStyle", "borderLeftStyle", "borderRightStyle"].includes(aliasedProp)) {
+    return {
+      property: "borderStyle",
+      value: processed === "dotted" || processed === "dashed" ? processed : "solid",
+      isDynamic: isDynamic
+    };
   }
   return {
     property: aliasedProp,

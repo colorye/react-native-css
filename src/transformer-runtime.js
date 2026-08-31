@@ -118,6 +118,21 @@ function getFlattenStyle(declarations) {
     merge(declarations[i]);
   }
 
+  const borderStyles = ["borderBottomStyle", "borderTopStyle", "borderLeftStyle", "borderRightStyle"];
+  for (const bs of borderStyles) {
+    if (result[bs] !== undefined) {
+      if (result.borderStyle === undefined) {
+        result.borderStyle = ["solid", "dotted", "dashed"].includes(result[bs]) ? result[bs] : "solid";
+      }
+      delete result[bs];
+    }
+  }
+  if (result.borderStyle !== undefined) {
+    if (typeof result.borderStyle !== "string" || !["solid", "dotted", "dashed"].includes(result.borderStyle)) {
+      delete result.borderStyle;
+    }
+  }
+
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
