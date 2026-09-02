@@ -113,9 +113,14 @@ jobs:
       - name: Inspect downloaded binaries
         run: |
           ls -la crates/transformer/*.node || true
+          if [ -f crates/transformer/transformer.linux-x64-gnu.node ] && [ ! -f crates/transformer/transformer.node ]; then
+            cp crates/transformer/transformer.linux-x64-gnu.node crates/transformer/transformer.node
+          fi
 
-      - name: Install
-        run: yarn install --immutable || yarn install
+      - name: Enable Corepack & Install
+        run: |
+          corepack enable
+          yarn install --immutable || yarn install
 
       - name: Build Project
         run: yarn build:js
