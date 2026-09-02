@@ -1152,6 +1152,9 @@ __metadata:
     "@babel/generator": "npm:^7.25.0"
     "@babel/preset-env": "npm:^7.22.9"
     lightningcss: "npm:^1.29.0"
+  peerDependencies:
+    react: ">=18.0.0"
+    react-native: "*"
   languageName: unknown
   linkType: soft
 

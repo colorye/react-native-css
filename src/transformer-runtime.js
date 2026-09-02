@@ -4,14 +4,9 @@ try {
 } catch {
   // Safe in Node/Babel build environment
 }
+
 const Appearance = RN.Appearance || { getColorScheme: () => "light" };
 const Dimensions = RN.Dimensions || { get: () => ({ width: 375, height: 812 }) };
-const PixelRatio = RN.PixelRatio || { roundToNearestPixel: (n) => n };
-
-import CssCalc from "./features/css-calc";
-import CssMedia from "./features/css-media";
-import CssTransform from "./features/css-transform";
-import CssVars from "./features/css-vars";
 
 // ============================================================================
 // Constants
@@ -28,14 +23,6 @@ const INHERIT_PROPERTIES = [
   "textAlign",
   "textTransform",
 ];
-
-// ============================================================================
-// Singleton Helper Instances
-// ============================================================================
-const vars = new CssVars();
-const transform = new CssTransform();
-const calc = new CssCalc();
-const media = new CssMedia();
 
 // ============================================================================
 // Cached Dimensions and Appearance
@@ -85,13 +72,10 @@ function clearCache() {
   currentCacheKey = null;
 }
 
-// Event listeners for cache invalidation
 try {
   Dimensions?.addEventListener?.("change", invalidateCache);
   Appearance?.addChangeListener?.(invalidateCache);
-} catch {
-  // Ignore in environments where listeners are not supported
-}
+} catch {}
 
 // ============================================================================
 // Flatten Style
@@ -137,7 +121,7 @@ function getFlattenStyle(declarations) {
 }
 
 // ============================================================================
-// Main Transform Function
+// Main Native Rust Stylesheet Transform
 // ============================================================================
 function transformStyles(stylesheet, classNames) {
   if (!stylesheet || !classNames) return undefined;
@@ -148,147 +132,36 @@ function transformStyles(stylesheet, classNames) {
   const { width, height } = getDimensions();
   const colorScheme = getColorScheme();
 
-  // Check cache validity
   const cacheKey = getCacheKey();
   if (cacheKey !== currentCacheKey) {
     TRANSFORM_CACHE = {};
     currentCacheKey = cacheKey;
   }
 
-  const transformedDeclarations = classNames.split(" ").map((className) => {
-    if (!className) return null;
+  if (TRANSFORM_CACHE[classNames] !== undefined) {
+    return TRANSFORM_CACHE[classNames];
+  }
 
-    // Check cache
-    if (TRANSFORM_CACHE[className] !== undefined) {
-      return TRANSFORM_CACHE[className];
+  const classes = classNames.trim().split(/\s+/);
+  const resolved = {};
+
+  for (const cls of classes) {
+    if (!cls) continue;
+    const entry = stylesheet[cls];
+    if (!entry) continue;
+
+    if (entry._static) {
+      Object.assign(resolved, entry._static);
+    } else if (entry._dynamic) {
+      Object.assign(resolved, entry._dynamic);
+    } else if (typeof entry === "object") {
+      Object.assign(resolved, entry);
     }
+  }
 
-    let declaration = stylesheet[className];
-    if (!declaration) {
-      if (
-        className.startsWith("active:") ||
-        className.startsWith("pressed:") ||
-        className.startsWith("disabled:") ||
-        className.startsWith("group-active:") ||
-        className.startsWith("group-pressed:")
-      ) {
-        const base = className
-          .replace(/^(active|pressed|disabled):/, "")
-          .replace(/^group-(active|pressed):/, "");
-        declaration =
-          stylesheet[base] ||
-          stylesheet[className] ||
-          stylesheet[`disabled:${base}`] ||
-          stylesheet[`active:${base}`] ||
-          stylesheet[`group-active:${base}`];
-      } else {
-        declaration =
-          stylesheet[`active:${className}`] ||
-          stylesheet[`pressed:${className}`] ||
-          stylesheet[`disabled:${className}`] ||
-          stylesheet[`group-active:${className}`];
-      }
-    }
-    const globalDeclaration = stylesheet[":root"];
-
-    if (!declaration && !globalDeclaration) {
-      TRANSFORM_CACHE[className] = null;
-      return null;
-    }
-
-    // Reset vars helper
-    vars.global = {};
-    vars.data = {};
-
-    if (globalDeclaration) {
-      // Handle global with potential _static/_dynamic format
-      const globalRaw = globalDeclaration._static
-        ? { ...globalDeclaration._static, ...globalDeclaration._dynamic }
-        : globalDeclaration;
-      vars.setGlobal(globalRaw, { width, height });
-    }
-
-    if (declaration) {
-      // Handle declaration with potential _static/_dynamic format
-      const declRaw = declaration._static
-        ? { ...declaration._static, ...declaration._dynamic }
-        : declaration;
-      vars.set(className, declRaw, { width, height });
-    }
-
-    // Get static and dynamic parts
-    const staticPart = declaration?._static || {};
-    const dynamicPart = declaration?._dynamic || (declaration?._static ? {} : declaration) || {};
-
-    // Start with pre-computed static styles (excluding CSS variables starting with --)
-    let results = {};
-    for (const key in staticPart) {
-      if (!vars.isVar(key)) {
-        results[key] = staticPart[key];
-      }
-    }
-
-    // Process dynamic properties
-    const transformDynamic = (currentSelector, decl) => {
-      for (let property in decl) {
-        if (vars.isVar(property)) continue;
-
-        let value = decl[property];
-
-        // Handle media queries
-        const [isMedia, matchedMedia] = media.match(property, { width, height, colorScheme });
-        if (isMedia) {
-          if (matchedMedia) {
-            vars.set(property, value);
-            // Media query value might have _static/_dynamic too
-            const mediaStatic = value?._static || {};
-            const mediaDynamic = value?._dynamic || (value?._static ? {} : value) || {};
-            for (const key in mediaStatic) {
-              if (!vars.isVar(key)) {
-                results[key] = mediaStatic[key];
-              }
-            }
-            transformDynamic(property, mediaDynamic);
-          }
-          continue;
-        }
-
-        // Transform the value
-        [property, value] = transform.transformUnsafeValue(property, value);
-        if (!property) continue;
-
-        value = vars.injectVar(currentSelector, value);
-        value = transform.transformUnsupportedUnit(value);
-        value = transform.transformViewportUnit(value, { width, height });
-        value = transform.removeUnit(value);
-        value = calc.calc(value);
-        value = calc.calcColor(value);
-        value = transform.transformFontScaling(property, value, {
-          width,
-          height,
-          roundFn: PixelRatio.roundToNearestPixel,
-        });
-
-        if (value === undefined) continue;
-
-        const transformed = transform.transform(property, value, { width, height });
-        if (transformed) {
-          for (const key in transformed) {
-            if (!vars.isVar(key)) {
-              results[key] = transformed[key];
-            }
-          }
-        }
-      }
-    };
-
-    transformDynamic(className, dynamicPart);
-
-    TRANSFORM_CACHE[className] = results;
-    return results;
-  });
-
-  return getFlattenStyle(transformedDeclarations);
+  const result = Object.keys(resolved).length > 0 ? resolved : undefined;
+  TRANSFORM_CACHE[classNames] = result;
+  return result;
 }
 
 // ============================================================================
@@ -310,32 +183,21 @@ function getInheritStyle(declarations) {
 // ============================================================================
 // Main Entry Point
 // ============================================================================
-function getStyle(stylesheet, [inheritStyle, className, style, elementName]) {
+function getStyle(stylesheet, [inheritStyle, className, style]) {
   const inherited = getInheritStyle(getFlattenStyle(inheritStyle));
   const transformed = transformStyles(stylesheet, className);
-  const result = getFlattenStyle([
-    inherited,
-    transformed,
-    style,
-  ]);
+  const result = getFlattenStyle([inherited, transformed, style]);
   return result;
 }
 
 // ============================================================================
 // Lightweight Merge for Static Styles
 // ============================================================================
-
-/**
- * Lightweight merge function for static styles with inheritStyle
- * Much cheaper than full getStyle() - just extracts inherited props and merges
- */
 function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
-  // Fast path: no inheritStyle
   if (!inheritStyle && !inlineStyle) {
     return staticStyles;
   }
 
-  // Extract inherited properties from inheritStyle
   let inherited;
   if (inheritStyle) {
     const flatInherit = getFlattenStyle(inheritStyle);
@@ -352,7 +214,6 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
     }
   }
 
-  // Merge: inheritStyle (lowest) -> staticStyles -> inlineStyle (highest)
   if (!inherited && !inlineStyle) {
     return staticStyles;
   }
@@ -361,7 +222,7 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
   if (inherited) Object.assign(result, inherited);
   if (staticStyles) {
     for (const key in staticStyles) {
-      if (!vars.isVar(key)) {
+      if (!key.startsWith("--")) {
         result[key] = staticStyles[key];
       }
     }

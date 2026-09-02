@@ -5,6 +5,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
 use swc_core::common::{
+    source_map::DefaultSourceMapGenConfig,
     sync::Lrc,
     FileName, SourceMap, DUMMY_SP,
 };
@@ -25,12 +26,21 @@ pub struct TransformOutput {
 pub struct TransformOptions {
     pub filename: Option<String>,
     pub stylesheet_json: Option<String>,
+    pub source_maps: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[napi(object)]
+pub struct RuntimeMatchOptions {
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub color_scheme: Option<String>,
 }
 
 /// Helper struct that holds parsed stylesheet declarations & resolves Tailwind CSS v4 variables
 pub struct StylesheetIndex {
-    raw_json: JsonValue,
-    root_vars: HashMap<String, String>,
+    pub raw_json: JsonValue,
+    pub root_vars: HashMap<String, String>,
 }
 
 impl StylesheetIndex {
@@ -83,13 +93,11 @@ impl StylesheetIndex {
                     if let Some(s) = v.as_str() {
                         local_vars.insert(k.clone(), s.to_string());
                     }
-                } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
-                    // React Native only supports global borderStyle ("solid" | "dotted" | "dashed")
-                    let s_val = v.as_str().unwrap_or("solid");
-                    let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid" };
-                    prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
+                } else if let Some(str_val) = v.as_str() {
+                    let resolved = self.resolve_css_value(str_val, k, &local_vars);
+                    Self::insert_resolved_property(&mut prop_map, k, resolved);
                 } else {
-                    prop_map.insert(k.clone(), v.clone());
+                    Self::insert_resolved_property(&mut prop_map, k, v.clone());
                 }
             }
         }
@@ -100,19 +108,9 @@ impl StylesheetIndex {
                 if !k.starts_with("--") {
                     if let Some(str_val) = v.as_str() {
                         let resolved = self.resolve_css_value(str_val, k, &local_vars);
-                        if k == "scale" {
-                            prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": resolved }]));
-                        } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
-                            let s_val = resolved.as_str().unwrap_or("solid").to_string();
-                            let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid".to_string() };
-                            prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
-                        } else {
-                            prop_map.insert(k.clone(), resolved);
-                        }
-                    } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
-                        prop_map.insert("borderStyle".to_string(), serde_json::json!("solid"));
+                        Self::insert_resolved_property(&mut prop_map, k, resolved);
                     } else {
-                        prop_map.insert(k.clone(), v.clone());
+                        Self::insert_resolved_property(&mut prop_map, k, v.clone());
                     }
                 }
             }
@@ -121,19 +119,9 @@ impl StylesheetIndex {
                 if !k.starts_with("--") && k != "_dynamic" && k != "_static" {
                     if let Some(str_val) = v.as_str() {
                         let resolved = self.resolve_css_value(str_val, k, &local_vars);
-                        if k == "scale" {
-                            prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": resolved }]));
-                        } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
-                            let s_val = resolved.as_str().unwrap_or("solid").to_string();
-                            let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid".to_string() };
-                            prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
-                        } else {
-                            prop_map.insert(k.clone(), resolved);
-                        }
-                    } else if k.ends_with("Style") || k.ends_with("borderStyle") || k == "borderStyle" {
-                        prop_map.insert("borderStyle".to_string(), serde_json::json!("solid"));
+                        Self::insert_resolved_property(&mut prop_map, k, resolved);
                     } else {
-                        prop_map.insert(k.clone(), v.clone());
+                        Self::insert_resolved_property(&mut prop_map, k, v.clone());
                     }
                 }
             }
@@ -147,7 +135,7 @@ impl StylesheetIndex {
     }
 
     /// Recursively resolve var(--name, fallback)
-    fn resolve_vars(&self, input: &str, local_vars: &HashMap<String, String>) -> String {
+    pub fn resolve_vars(&self, input: &str, local_vars: &HashMap<String, String>) -> String {
         let mut result = input.to_string();
         let mut iterations = 0;
 
@@ -202,8 +190,8 @@ impl StylesheetIndex {
         result
     }
 
-    /// Resolve unit (rem -> px, px, calc evaluation, React Native specific conversions)
-    fn resolve_css_value(&self, input: &str, property: &str, local_vars: &HashMap<String, String>) -> JsonValue {
+    /// Resolve unit (rem -> px, px, calc evaluation, React Native specific conversions, transitions)
+    pub fn resolve_css_value(&self, input: &str, property: &str, local_vars: &HashMap<String, String>) -> JsonValue {
         let after_vars = self.resolve_vars(input, local_vars);
         let trimmed_raw = after_vars.trim();
 
@@ -223,6 +211,19 @@ impl StylesheetIndex {
             trimmed_raw
         };
 
+        // Handle animation & transition timing (e.g. "150ms" -> 150, "0.3s" -> 300)
+        if property == "transitionDuration" || property == "animationDuration" || property == "transitionDelay" {
+            if trimmed.ends_with("ms") {
+                if let Ok(ms) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
+                    return serde_json::json!(ms);
+                }
+            } else if trimmed.ends_with('s') {
+                if let Ok(s) = trimmed[..trimmed.len() - 1].trim().parse::<f64>() {
+                    return serde_json::json!(s * 1000.0);
+                }
+            }
+        }
+
         // Handle React Native scale percentages e.g. "95%" -> 0.95
         if property == "scale" {
             let first_part = trimmed.split_whitespace().next().unwrap_or(trimmed);
@@ -236,7 +237,7 @@ impl StylesheetIndex {
             }
         }
 
-        // Handle React Native borderStyle and fontWeight: must be strings! ("solid", "dashed", "dotted", "700", "400", etc.)
+        // Handle React Native borderStyle: must be string "solid", "dashed", "dotted"
         if property.ends_with("Style") || property.ends_with("borderStyle") || property == "borderStyle" {
             let valid_style = if trimmed == "dotted" || trimmed == "dashed" { trimmed } else { "solid" };
             return serde_json::json!(valid_style);
@@ -253,9 +254,21 @@ impl StylesheetIndex {
             return serde_json::json!(9999.0);
         }
 
-        // Handle lab(L% a b) / oklch(L C H) / rgb(r g b / a) color functions for React Native
+        // Handle color-mix(in srgb, ...)
+        if trimmed.starts_with("color-mix(") {
+            if let Some(resolved) = Self::eval_color_mix(trimmed) {
+                return serde_json::json!(resolved);
+            }
+        }
+
+        // Handle lab(L% a b) / oklch(L C H) / rgb(r g b / a) / hsl(h s l / a) color functions for React Native
         if (trimmed.starts_with("rgb(") || trimmed.starts_with("rgba(")) && trimmed.ends_with(')') {
             if let Some(hex) = Self::rgb_to_hex(trimmed) {
+                return serde_json::json!(hex);
+            }
+        }
+        if (trimmed.starts_with("hsl(") || trimmed.starts_with("hsla(")) && trimmed.ends_with(')') {
+            if let Some(hex) = Self::hsl_to_hex(trimmed) {
                 return serde_json::json!(hex);
             }
         }
@@ -314,17 +327,82 @@ impl StylesheetIndex {
         serde_json::json!(trimmed)
     }
 
-    fn rgb_to_hex(color_str: &str) -> Option<String> {
+    pub fn hsl_to_hex(color_str: &str) -> Option<String> {
+        let prefix_len = if color_str.starts_with("hsla(") { 5 } else { 4 };
+        let inner = color_str[prefix_len..color_str.len() - 1].trim();
+        let (hsl_part, alpha_part) = match inner.find('/') {
+            Some(idx) => (inner[..idx].trim(), Some(inner[idx + 1..].trim())),
+            None => (inner, None),
+        };
+
+        let parts: Vec<&str> = if hsl_part.contains(',') {
+            hsl_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+        } else {
+            hsl_part.split_whitespace().collect()
+        };
+
+        if parts.len() < 3 {
+            return None;
+        }
+
+        let h_str = parts[0].trim_end_matches("deg");
+        let h = h_str.parse::<f64>().ok()? / 360.0;
+        let s = parts[1].trim_end_matches('%').parse::<f64>().ok()? / 100.0;
+        let l = parts[2].trim_end_matches('%').parse::<f64>().ok()? / 100.0;
+
+        let alpha = if let Some(a_str) = alpha_part {
+            if a_str.ends_with('%') {
+                a_str.trim_end_matches('%').parse::<f64>().ok()? / 100.0
+            } else {
+                a_str.parse::<f64>().ok()?
+            }
+        } else if parts.len() > 3 {
+            if parts[3].ends_with('%') {
+                parts[3].trim_end_matches('%').parse::<f64>().ok()? / 100.0
+            } else {
+                parts[3].parse::<f64>().ok()?
+            }
+        } else {
+            1.0
+        };
+
+        let (r, g, b) = if s == 0.0 {
+            (l, l, l)
+        } else {
+            let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+            let p = 2.0 * l - q;
+            let hue_to_rgb = |mut t: f64| {
+                if t < 0.0 { t += 1.0; }
+                if t > 1.0 { t -= 1.0; }
+                if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
+                if t < 1.0 / 2.0 { return q; }
+                if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+                p
+            };
+            (hue_to_rgb(h + 1.0 / 3.0), hue_to_rgb(h), hue_to_rgb(h - 1.0 / 3.0))
+        };
+
+        let r_byte = (r * 255.0).round().clamp(0.0, 255.0) as u8;
+        let g_byte = (g * 255.0).round().clamp(0.0, 255.0) as u8;
+        let b_byte = (b * 255.0).round().clamp(0.0, 255.0) as u8;
+
+        if (alpha - 1.0).abs() < f64::EPSILON {
+            Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
+        } else {
+            let a_byte = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+            Some(format!("#{:02x}{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte, a_byte))
+        }
+    }
+
+    pub fn rgb_to_hex(color_str: &str) -> Option<String> {
         let prefix_len = if color_str.starts_with("rgba(") { 5 } else { 4 };
         let inner = color_str[prefix_len..color_str.len() - 1].trim();
 
-        // Handle slash syntax: "83 194 188 / 0.5" or "83, 194, 188 / 0.5"
         let (rgb_part, alpha_part) = match inner.find('/') {
             Some(idx) => (inner[..idx].trim(), Some(inner[idx + 1..].trim())),
             None => (inner, None),
         };
 
-        // Split by comma or whitespace
         let components: Vec<&str> = if rgb_part.contains(',') {
             rgb_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
         } else {
@@ -335,9 +413,17 @@ impl StylesheetIndex {
             return None;
         }
 
-        let r = components[0].parse::<f64>().ok()?.round().clamp(0.0, 255.0) as u8;
-        let g = components[1].parse::<f64>().ok()?.round().clamp(0.0, 255.0) as u8;
-        let b = components[2].parse::<f64>().ok()?.round().clamp(0.0, 255.0) as u8;
+        let parse_comp = |s: &str| -> Option<f64> {
+            if s.ends_with('%') {
+                Some(s.trim_end_matches('%').parse::<f64>().ok()? * 2.55)
+            } else {
+                s.parse::<f64>().ok()
+            }
+        };
+
+        let r = parse_comp(components[0])?.round().clamp(0.0, 255.0) as u8;
+        let g = parse_comp(components[1])?.round().clamp(0.0, 255.0) as u8;
+        let b = parse_comp(components[2])?.round().clamp(0.0, 255.0) as u8;
 
         let alpha_str = if let Some(a_str) = alpha_part {
             Some(a_str)
@@ -365,9 +451,19 @@ impl StylesheetIndex {
         }
     }
 
-    fn lab_to_hex(color_str: &str) -> Option<String> {
+    pub fn lab_to_hex(color_str: &str) -> Option<String> {
         let inner = color_str[4..color_str.len() - 1].trim();
-        let parts: Vec<&str> = inner.split_whitespace().collect();
+        let (lab_part, alpha_part) = match inner.find('/') {
+            Some(idx) => (inner[..idx].trim(), Some(inner[idx + 1..].trim())),
+            None => (inner, None),
+        };
+
+        let parts: Vec<&str> = if lab_part.contains(',') {
+            lab_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+        } else {
+            lab_part.split_whitespace().collect()
+        };
+
         if parts.len() < 3 {
             return None;
         }
@@ -376,6 +472,22 @@ impl StylesheetIndex {
         let l_val = l_str.parse::<f64>().ok()?;
         let a_val = parts[1].parse::<f64>().ok()?;
         let b_val = parts[2].parse::<f64>().ok()?;
+
+        let alpha = if let Some(a_str) = alpha_part {
+            if a_str.ends_with('%') {
+                a_str.trim_end_matches('%').parse::<f64>().ok()? / 100.0
+            } else {
+                a_str.parse::<f64>().ok()?
+            }
+        } else if parts.len() > 3 {
+            if parts[3].ends_with('%') {
+                parts[3].trim_end_matches('%').parse::<f64>().ok()? / 100.0
+            } else {
+                parts[3].parse::<f64>().ok()?
+            }
+        } else {
+            1.0
+        };
 
         let y = (l_val + 16.0) / 116.0;
         let x = a_val / 500.0 + y;
@@ -409,23 +521,54 @@ impl StylesheetIndex {
         let g_byte = (gamma(g) * 255.0).round().clamp(0.0, 255.0) as u8;
         let b_byte = (gamma(b) * 255.0).round().clamp(0.0, 255.0) as u8;
 
-        Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
+        if (alpha - 1.0).abs() < f64::EPSILON {
+            Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
+        } else {
+            let a_byte = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+            Some(format!("#{:02x}{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte, a_byte))
+        }
     }
 
-    fn oklch_to_hex(color_str: &str) -> Option<String> {
+    pub fn oklch_to_hex(color_str: &str) -> Option<String> {
         let inner = color_str[6..color_str.len() - 1].trim();
-        let parts: Vec<&str> = inner.split_whitespace().collect();
+        let (oklch_part, alpha_part) = match inner.find('/') {
+            Some(idx) => (inner[..idx].trim(), Some(inner[idx + 1..].trim())),
+            None => (inner, None),
+        };
+
+        let parts: Vec<&str> = if oklch_part.contains(',') {
+            oklch_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+        } else {
+            oklch_part.split_whitespace().collect()
+        };
+
         if parts.len() < 3 {
             return None;
         }
 
         let l_str = parts[0].trim_end_matches('%');
         let mut l_val = l_str.parse::<f64>().ok()?;
-        if parts[0].ends_with('%') {
+        if parts[0].ends_with('%') || l_val > 1.0 {
             l_val /= 100.0;
         }
         let c_val = parts[1].parse::<f64>().ok()?;
-        let h_val = parts[2].parse::<f64>().ok()?;
+        let h_val = parts[2].trim_end_matches("deg").parse::<f64>().ok()?;
+
+        let alpha = if let Some(a_str) = alpha_part {
+            if a_str.ends_with('%') {
+                a_str.trim_end_matches('%').parse::<f64>().ok()? / 100.0
+            } else {
+                a_str.parse::<f64>().ok()?
+            }
+        } else if parts.len() > 3 {
+            if parts[3].ends_with('%') {
+                parts[3].trim_end_matches('%').parse::<f64>().ok()? / 100.0
+            } else {
+                parts[3].parse::<f64>().ok()?
+            }
+        } else {
+            1.0
+        };
 
         let h_rad = h_val.to_radians();
         let a = c_val * h_rad.cos();
@@ -455,7 +598,147 @@ impl StylesheetIndex {
         let g_byte = (gamma(g) * 255.0).round().clamp(0.0, 255.0) as u8;
         let b_byte = (gamma(b_val) * 255.0).round().clamp(0.0, 255.0) as u8;
 
-        Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
+        if (alpha - 1.0).abs() < f64::EPSILON {
+            Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
+        } else {
+            let a_byte = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+            Some(format!("#{:02x}{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte, a_byte))
+        }
+    }
+
+    pub fn parse_color_rgba(c: &str) -> Option<(u8, u8, u8, f64)> {
+        let trimmed = c.trim().to_lowercase();
+        if trimmed == "transparent" {
+            return Some((0, 0, 0, 0.0));
+        }
+        if trimmed == "white" { return Some((255, 255, 255, 1.0)); }
+        if trimmed == "black" { return Some((0, 0, 0, 1.0)); }
+        if trimmed == "red" { return Some((255, 0, 0, 1.0)); }
+        if trimmed == "green" { return Some((0, 128, 0, 1.0)); }
+        if trimmed == "blue" { return Some((0, 0, 255, 1.0)); }
+        if trimmed == "yellow" { return Some((255, 255, 0, 1.0)); }
+
+        if trimmed.starts_with('#') {
+            let hex = &trimmed[1..];
+            if hex.len() == 3 {
+                let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
+                let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
+                let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
+                return Some((r, g, b, 1.0));
+            } else if hex.len() == 4 {
+                let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
+                let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
+                let b = u8::from_str_radix(&hex[2..3].repeat(2), 16).ok()?;
+                let a = u8::from_str_radix(&hex[3..4].repeat(2), 16).ok()? as f64 / 255.0;
+                return Some((r, g, b, a));
+            } else if hex.len() == 6 {
+                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                return Some((r, g, b, 1.0));
+            } else if hex.len() == 8 {
+                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                let a = u8::from_str_radix(&hex[6..8], 16).ok()? as f64 / 255.0;
+                return Some((r, g, b, a));
+            }
+        }
+
+        if trimmed.starts_with("rgb(") || trimmed.starts_with("rgba(") {
+            let hex = Self::rgb_to_hex(&trimmed)?;
+            return Self::parse_color_rgba(&hex);
+        }
+        if trimmed.starts_with("hsl(") || trimmed.starts_with("hsla(") {
+            let hex = Self::hsl_to_hex(&trimmed)?;
+            return Self::parse_color_rgba(&hex);
+        }
+        if trimmed.starts_with("oklch(") {
+            let hex = Self::oklch_to_hex(&trimmed)?;
+            return Self::parse_color_rgba(&hex);
+        }
+        if trimmed.starts_with("lab(") {
+            let hex = Self::lab_to_hex(&trimmed)?;
+            return Self::parse_color_rgba(&hex);
+        }
+
+        None
+    }
+
+    pub fn eval_color_mix(expr: &str) -> Option<String> {
+        let inner = expr.strip_prefix("color-mix(")?.strip_suffix(')')?.trim();
+        let comma_idx = inner.find(',')?;
+        let _color_space = inner[..comma_idx].trim(); // e.g. "in srgb"
+        let args_str = inner[comma_idx + 1..].trim();
+
+        // Split args at top level comma
+        let mut depth = 0;
+        let mut split_pos = None;
+        for (i, c) in args_str.char_indices() {
+            if c == '(' { depth += 1; }
+            else if c == ')' { depth -= 1; }
+            else if c == ',' && depth == 0 {
+                split_pos = Some(i);
+                break;
+            }
+        }
+
+        let split_pos = split_pos?;
+        let arg1_str = args_str[..split_pos].trim();
+        let arg2_str = args_str[split_pos + 1..].trim();
+
+        let parse_arg = |arg: &str| -> (String, Option<f64>) {
+            let parts: Vec<&str> = arg.split_whitespace().collect();
+            if parts.len() >= 2 && parts.last().unwrap().ends_with('%') {
+                let pct = parts.last().unwrap().trim_end_matches('%').parse::<f64>().ok();
+                let col = parts[..parts.len() - 1].join(" ");
+                (col, pct)
+            } else if parts.len() >= 2 && parts.first().unwrap().ends_with('%') {
+                let pct = parts.first().unwrap().trim_end_matches('%').parse::<f64>().ok();
+                let col = parts[1..].join(" ");
+                (col, pct)
+            } else {
+                (arg.to_string(), None)
+            }
+        };
+
+        let (c1_str, p1) = parse_arg(arg1_str);
+        let (c2_str, p2) = parse_arg(arg2_str);
+
+        let (r1, g1, b1, a1) = Self::parse_color_rgba(&c1_str)?;
+        let (r2, g2, b2, a2) = Self::parse_color_rgba(&c2_str)?;
+
+        let (w1, w2) = match (p1, p2) {
+            (Some(v1), Some(v2)) => {
+                let sum = v1 + v2;
+                if sum > 100.0 { (v1 / sum * 100.0, v2 / sum * 100.0) } else { (v1, v2) }
+            }
+            (Some(v1), None) => (v1, 100.0 - v1),
+            (None, Some(v2)) => (100.0 - v2, v2),
+            (None, None) => (50.0, 50.0),
+        };
+
+        let total_weight = w1 + w2;
+        if total_weight <= 0.0 {
+            return Some("transparent".to_string());
+        }
+
+        let f1 = w1 / total_weight;
+        let f2 = w2 / total_weight;
+
+        let mixed_a = a1 * f1 + a2 * f2;
+        let mixed_r = if mixed_a == 0.0 { 0 } else { ((r1 as f64 * a1 * f1 + r2 as f64 * a2 * f2) / mixed_a).round() as u8 };
+        let mixed_g = if mixed_a == 0.0 { 0 } else { ((g1 as f64 * a1 * f1 + g2 as f64 * a2 * f2) / mixed_a).round() as u8 };
+        let mixed_b = if mixed_a == 0.0 { 0 } else { ((b1 as f64 * a1 * f1 + b2 as f64 * a2 * f2) / mixed_a).round() as u8 };
+
+        let final_a = if total_weight < 100.0 { mixed_a * (total_weight / 100.0) } else { mixed_a };
+
+        if (final_a - 1.0).abs() < f64::EPSILON {
+            Some(format!("#{:02x}{:02x}{:02x}", mixed_r, mixed_g, mixed_b))
+        } else {
+            let a_byte = (final_a * 255.0).round().clamp(0.0, 255.0) as u8;
+            Some(format!("#{:02x}{:02x}{:02x}{:02x}", mixed_r, mixed_g, mixed_b, a_byte))
+        }
     }
 
     /// Evaluate mathematical expressions supporting +, -, *, /, (), rem, px, and floats
@@ -565,16 +848,360 @@ impl StylesheetIndex {
         parse_expr(&chars, &mut pos)
     }
 
+    pub fn parse_unit_val(s: &str) -> JsonValue {
+        let trimmed = s.trim();
+        if trimmed.ends_with("rem") {
+            if let Ok(num) = trimmed[..trimmed.len() - 3].trim().parse::<f64>() {
+                return serde_json::json!(num * 16.0);
+            }
+        }
+        if trimmed.ends_with("px") {
+            if let Ok(num) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
+                return serde_json::json!(num);
+            }
+        }
+        if let Ok(num) = trimmed.parse::<f64>() {
+            return serde_json::json!(num);
+        }
+        serde_json::json!(trimmed)
+    }
+
+    pub fn expand_spacing(key: &str, val: &JsonValue) -> Option<Vec<(String, JsonValue)>> {
+        if key != "padding" && key != "margin" {
+            return None;
+        }
+
+        if let Some(num) = val.as_f64() {
+            return Some(vec![
+                (format!("{}Top", key), serde_json::json!(num)),
+                (format!("{}Right", key), serde_json::json!(num)),
+                (format!("{}Bottom", key), serde_json::json!(num)),
+                (format!("{}Left", key), serde_json::json!(num)),
+            ]);
+        }
+
+        let s = val.as_str()?;
+        let parts: Vec<&str> = s.split_whitespace().collect();
+        match parts.len() {
+            1 => {
+                let v = Self::parse_unit_val(parts[0]);
+                Some(vec![
+                    (format!("{}Top", key), v.clone()),
+                    (format!("{}Right", key), v.clone()),
+                    (format!("{}Bottom", key), v.clone()),
+                    (format!("{}Left", key), v),
+                ])
+            }
+            2 => {
+                let top_bottom = Self::parse_unit_val(parts[0]);
+                let left_right = Self::parse_unit_val(parts[1]);
+                Some(vec![
+                    (format!("{}Top", key), top_bottom.clone()),
+                    (format!("{}Bottom", key), top_bottom),
+                    (format!("{}Left", key), left_right.clone()),
+                    (format!("{}Right", key), left_right),
+                ])
+            }
+            3 => {
+                let top = Self::parse_unit_val(parts[0]);
+                let left_right = Self::parse_unit_val(parts[1]);
+                let bottom = Self::parse_unit_val(parts[2]);
+                Some(vec![
+                    (format!("{}Top", key), top),
+                    (format!("{}Left", key), left_right.clone()),
+                    (format!("{}Right", key), left_right),
+                    (format!("{}Bottom", key), bottom),
+                ])
+            }
+            4 => {
+                let top = Self::parse_unit_val(parts[0]);
+                let right = Self::parse_unit_val(parts[1]);
+                let bottom = Self::parse_unit_val(parts[2]);
+                let left = Self::parse_unit_val(parts[3]);
+                Some(vec![
+                    (format!("{}Top", key), top),
+                    (format!("{}Right", key), right),
+                    (format!("{}Bottom", key), bottom),
+                    (format!("{}Left", key), left),
+                ])
+            }
+            _ => None,
+        }
+    }
+
+    pub fn expand_border(key: &str, val: &JsonValue) -> Option<Vec<(String, JsonValue)>> {
+        if key != "border" && key != "borderTop" && key != "borderBottom" && key != "borderLeft" && key != "borderRight" {
+            return None;
+        }
+
+        if let Some(s) = val.as_str() {
+            if s == "none" || s == "0" || s == "0px" {
+                return Some(vec![(format!("{}Width", key), serde_json::json!(0.0))]);
+            }
+            let parts: Vec<&str> = s.split_whitespace().collect();
+            if parts.is_empty() {
+                return None;
+            }
+
+            let mut results = Vec::new();
+            let mut style_found = false;
+
+            for part in parts {
+                if part == "solid" || part == "dashed" || part == "dotted" {
+                    results.push(("borderStyle".to_string(), serde_json::json!(part)));
+                    style_found = true;
+                } else if part.ends_with("px") || part.ends_with("rem") || part.parse::<f64>().is_ok() {
+                    results.push((format!("{}Width", key), Self::parse_unit_val(part)));
+                } else {
+                    // Color token
+                    results.push((format!("{}Color", key), serde_json::json!(part)));
+                }
+            }
+
+            if !style_found {
+                results.push(("borderStyle".to_string(), serde_json::json!("solid")));
+            }
+
+            return Some(results);
+        }
+
+        if let Some(n) = val.as_f64() {
+            return Some(vec![
+                (format!("{}Width", key), serde_json::json!(n)),
+                ("borderStyle".to_string(), serde_json::json!("solid")),
+            ]);
+        }
+
+        None
+    }
+
+    pub fn expand_logical(key: &str, val: &JsonValue) -> Option<Vec<(String, JsonValue)>> {
+        match key {
+            "paddingInline" => {
+                if let Some(s) = val.as_str() {
+                    let parts: Vec<&str> = s.split_whitespace().collect();
+                    if parts.len() == 1 {
+                        return Some(vec![("paddingHorizontal".to_string(), Self::parse_unit_val(parts[0]))]);
+                    } else if parts.len() >= 2 {
+                        return Some(vec![
+                            ("paddingStart".to_string(), Self::parse_unit_val(parts[0])),
+                            ("paddingEnd".to_string(), Self::parse_unit_val(parts[1])),
+                        ]);
+                    }
+                }
+                Some(vec![("paddingHorizontal".to_string(), val.clone())])
+            }
+            "marginInline" => {
+                if let Some(s) = val.as_str() {
+                    let parts: Vec<&str> = s.split_whitespace().collect();
+                    if parts.len() == 1 {
+                        return Some(vec![("marginHorizontal".to_string(), Self::parse_unit_val(parts[0]))]);
+                    } else if parts.len() >= 2 {
+                        return Some(vec![
+                            ("marginStart".to_string(), Self::parse_unit_val(parts[0])),
+                            ("marginEnd".to_string(), Self::parse_unit_val(parts[1])),
+                        ]);
+                    }
+                }
+                Some(vec![("marginHorizontal".to_string(), val.clone())])
+            }
+            "paddingBlock" => {
+                if let Some(s) = val.as_str() {
+                    let parts: Vec<&str> = s.split_whitespace().collect();
+                    if parts.len() == 1 {
+                        return Some(vec![("paddingVertical".to_string(), Self::parse_unit_val(parts[0]))]);
+                    } else if parts.len() >= 2 {
+                        return Some(vec![
+                            ("paddingTop".to_string(), Self::parse_unit_val(parts[0])),
+                            ("paddingBottom".to_string(), Self::parse_unit_val(parts[1])),
+                        ]);
+                    }
+                }
+                Some(vec![("paddingVertical".to_string(), val.clone())])
+            }
+            "marginBlock" => {
+                if let Some(s) = val.as_str() {
+                    let parts: Vec<&str> = s.split_whitespace().collect();
+                    if parts.len() == 1 {
+                        return Some(vec![("marginVertical".to_string(), Self::parse_unit_val(parts[0]))]);
+                    } else if parts.len() >= 2 {
+                        return Some(vec![
+                            ("marginTop".to_string(), Self::parse_unit_val(parts[0])),
+                            ("marginBottom".to_string(), Self::parse_unit_val(parts[1])),
+                        ]);
+                    }
+                }
+                Some(vec![("marginVertical".to_string(), val.clone())])
+            }
+            "insetInline" => {
+                if let Some(s) = val.as_str() {
+                    let parts: Vec<&str> = s.split_whitespace().collect();
+                    if parts.len() == 1 {
+                        let v = Self::parse_unit_val(parts[0]);
+                        return Some(vec![
+                            ("left".to_string(), v.clone()),
+                            ("right".to_string(), v),
+                        ]);
+                    } else if parts.len() >= 2 {
+                        return Some(vec![
+                            ("start".to_string(), Self::parse_unit_val(parts[0])),
+                            ("end".to_string(), Self::parse_unit_val(parts[1])),
+                        ]);
+                    }
+                }
+                Some(vec![("left".to_string(), val.clone()), ("right".to_string(), val.clone())])
+            }
+            "insetBlock" => {
+                if let Some(s) = val.as_str() {
+                    let parts: Vec<&str> = s.split_whitespace().collect();
+                    if parts.len() == 1 {
+                        let v = Self::parse_unit_val(parts[0]);
+                        return Some(vec![
+                            ("top".to_string(), v.clone()),
+                            ("bottom".to_string(), v),
+                        ]);
+                    } else if parts.len() >= 2 {
+                        return Some(vec![
+                            ("top".to_string(), Self::parse_unit_val(parts[0])),
+                            ("bottom".to_string(), Self::parse_unit_val(parts[1])),
+                        ]);
+                    }
+                }
+                Some(vec![("top".to_string(), val.clone()), ("bottom".to_string(), val.clone())])
+            }
+            "paddingInlineStart" => Some(vec![("paddingStart".to_string(), val.clone())]),
+            "paddingInlineEnd" => Some(vec![("paddingEnd".to_string(), val.clone())]),
+            "marginInlineStart" => Some(vec![("marginStart".to_string(), val.clone())]),
+            "marginInlineEnd" => Some(vec![("marginEnd".to_string(), val.clone())]),
+            "insetInlineStart" => Some(vec![("start".to_string(), val.clone())]),
+            "insetInlineEnd" => Some(vec![("end".to_string(), val.clone())]),
+            "insetBlockStart" => Some(vec![("top".to_string(), val.clone())]),
+            "insetBlockEnd" => Some(vec![("bottom".to_string(), val.clone())]),
+            _ => None,
+        }
+    }
+
+    pub fn expand_transform(val: &JsonValue) -> Option<JsonValue> {
+        let s = val.as_str()?;
+        let mut transforms = Vec::new();
+
+        let mut i = 0;
+        let bytes = s.as_bytes();
+        while i < bytes.len() {
+            if let Some(open) = s[i..].find('(') {
+                let fn_name = s[i..i + open].trim();
+                let abs_open = i + open;
+                if let Some(close) = s[abs_open..].find(')') {
+                    let abs_close = abs_open + close;
+                    let args = s[abs_open + 1..abs_close].trim();
+
+                    match fn_name {
+                        "translateX" | "translateY" | "scale" | "scaleX" | "scaleY" | "rotate" | "rotateX" | "rotateY" | "rotateZ" | "skewX" | "skewY" | "perspective" => {
+                            let parsed_arg = Self::parse_unit_val(args);
+                            let mut map = serde_json::Map::new();
+                            map.insert(fn_name.to_string(), parsed_arg);
+                            transforms.push(JsonValue::Object(map));
+                        }
+                        "translate" => {
+                            let parts: Vec<&str> = args.split(',').map(|p| p.trim()).collect();
+                            if !parts.is_empty() {
+                                let mut map_x = serde_json::Map::new();
+                                map_x.insert("translateX".to_string(), Self::parse_unit_val(parts[0]));
+                                transforms.push(JsonValue::Object(map_x));
+                                if parts.len() > 1 {
+                                    let mut map_y = serde_json::Map::new();
+                                    map_y.insert("translateY".to_string(), Self::parse_unit_val(parts[1]));
+                                    transforms.push(JsonValue::Object(map_y));
+                                }
+                            }
+                        }
+                        "skew" => {
+                            let parts: Vec<&str> = args.split(',').map(|p| p.trim()).collect();
+                            if !parts.is_empty() {
+                                let mut map_x = serde_json::Map::new();
+                                map_x.insert("skewX".to_string(), Self::parse_unit_val(parts[0]));
+                                transforms.push(JsonValue::Object(map_x));
+                                if parts.len() > 1 {
+                                    let mut map_y = serde_json::Map::new();
+                                    map_y.insert("skewY".to_string(), Self::parse_unit_val(parts[1]));
+                                    transforms.push(JsonValue::Object(map_y));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    i = abs_close + 1;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        if transforms.is_empty() {
+            None
+        } else {
+            Some(JsonValue::Array(transforms))
+        }
+    }
+
+    pub fn insert_resolved_property(prop_map: &mut HashMap<String, JsonValue>, key: &str, val: JsonValue) {
+        if key == "scale" {
+            prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": val }]));
+            return;
+        }
+
+        if let Some(expanded) = Self::expand_border(key, &val) {
+            for (k, v) in expanded {
+                prop_map.insert(k, v);
+            }
+            return;
+        }
+
+        if let Some(expanded) = Self::expand_spacing(key, &val) {
+            for (k, v) in expanded {
+                prop_map.insert(k, v);
+            }
+            return;
+        }
+
+        if let Some(expanded) = Self::expand_logical(key, &val) {
+            for (k, v) in expanded {
+                prop_map.insert(k, v);
+            }
+            return;
+        }
+
+        if key == "transform" {
+            if let Some(transforms) = Self::expand_transform(&val) {
+                prop_map.insert(key.to_string(), transforms);
+                return;
+            }
+        }
+
+        if key.ends_with("Style") || key.ends_with("borderStyle") || key == "borderStyle" {
+            let s_val = val.as_str().unwrap_or("solid").to_string();
+            let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid".to_string() };
+            prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
+            return;
+        }
+
+        prop_map.insert(key.to_string(), val);
+    }
+
     pub fn is_class_static(&self, class_name: &str) -> bool {
         let stripped = class_name
             .strip_prefix("active:")
             .or_else(|| class_name.strip_prefix("pressed:"))
+            .or_else(|| class_name.strip_prefix("group-active:"))
+            .or_else(|| class_name.strip_prefix("group-pressed:"))
             .or_else(|| class_name.strip_prefix("disabled:"))
             .unwrap_or(class_name);
 
-        if stripped == "group"
-            || stripped.starts_with("group")
-            || stripped.starts_with("peer")
+        if stripped == "group" {
+            return true;
+        }
+
+        if stripped.starts_with("peer")
             || stripped.starts_with("dark:")
             || stripped.starts_with("light:")
             || stripped.starts_with("sm:")
@@ -604,6 +1231,9 @@ impl StylesheetIndex {
 
         let mut merged = HashMap::new();
         for &cls in &classes {
+            if cls == "group" {
+                continue;
+            }
             if let Some(props) = self.get_class_style(cls) {
                 for (k, v) in props {
                     merged.insert(k.clone(), v.clone());
@@ -612,8 +1242,6 @@ impl StylesheetIndex {
         }
 
         // Clean up React Native specific style conflicts
-        // React Native only supports borderStyle ("solid" | "dotted" | "dashed") globally, NOT borderBottomStyle, borderTopStyle, etc.
-        // Remove individual directional border styles if present to prevent RCTView error
         merged.remove("borderBottomStyle");
         merged.remove("borderTopStyle");
         merged.remove("borderLeftStyle");
@@ -741,6 +1369,7 @@ impl StyleSheetCollector {
 struct CssTransformerVisitor<'a> {
     stylesheet: &'a StylesheetIndex,
     collector: &'a mut StyleSheetCollector,
+    has_animated_transition: bool,
 }
 
 impl<'a> CssTransformerVisitor<'a> {
@@ -749,41 +1378,46 @@ impl<'a> CssTransformerVisitor<'a> {
         &mut self,
         class_str: &str,
         disabled_prop_expr: Option<&Expr>,
-    ) -> Option<(Option<Expr>, Option<Expr>, Option<Expr>)> {
+    ) -> Option<(Option<Expr>, Option<Expr>, Option<Expr>, Option<Expr>)> {
         let classes: Vec<&str> = class_str.split_whitespace().collect();
         if classes.is_empty() {
             return None;
         }
 
-        // If any class is group or group-* or peer or dynamic breakpoint, do NOT inline statically, let runtime handle it
-        for cls in &classes {
-            if *cls == "group"
-                || cls.starts_with("group")
-                || cls.starts_with("peer")
-                || cls.starts_with("sm:")
+        let mut normal_classes = Vec::new();
+        let mut active_classes = Vec::new();
+        let mut disabled_classes = Vec::new();
+        let mut transition_classes = Vec::new();
+
+        for cls in classes {
+            if cls == "group" {
+                continue;
+            } else if let Some(rest) = cls.strip_prefix("active:").or_else(|| cls.strip_prefix("pressed:")) {
+                active_classes.push(rest);
+            } else if let Some(rest) = cls.strip_prefix("group-active:").or_else(|| cls.strip_prefix("group-pressed:")) {
+                active_classes.push(rest);
+            } else if let Some(rest) = cls.strip_prefix("disabled:") {
+                disabled_classes.push(rest);
+            } else if cls.starts_with("transition") || cls.starts_with("duration-") || cls.starts_with("ease-") || cls.starts_with("delay-") {
+                transition_classes.push(cls);
+                normal_classes.push(cls);
+            } else if cls.starts_with("sm:")
                 || cls.starts_with("md:")
                 || cls.starts_with("lg:")
                 || cls.starts_with("xl:")
                 || cls.starts_with("2xl:")
                 || cls.starts_with("dark:")
                 || cls.starts_with("light:")
+                || cls.starts_with("peer")
             {
                 return None;
-            }
-        }
-
-        let mut normal_classes = Vec::new();
-        let mut active_classes = Vec::new();
-        let mut disabled_classes = Vec::new();
-
-        for cls in classes {
-            if let Some(rest) = cls.strip_prefix("active:").or_else(|| cls.strip_prefix("pressed:")) {
-                active_classes.push(rest);
-            } else if let Some(rest) = cls.strip_prefix("disabled:") {
-                disabled_classes.push(rest);
             } else {
                 normal_classes.push(cls);
             }
+        }
+
+        if !transition_classes.is_empty() {
+            self.has_animated_transition = true;
         }
 
         // If disabled: variants are present but there is no disabled={...} prop on the element,
@@ -816,25 +1450,38 @@ impl<'a> CssTransformerVisitor<'a> {
             None
         };
 
+        let transition_expr = if !transition_classes.is_empty() {
+            let map = self.stylesheet.compute_static_styles(&transition_classes.join(" "));
+            if let Some(trans_map) = map {
+                let id = self.collector.get_or_insert(JsonValue::Object(trans_map.into_iter().collect()));
+                Some(self.collector.to_member_expr(&id))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         if normal_expr.is_none() && active_expr.is_none() && disabled_expr.is_none() {
             return None;
         }
 
-        Some((normal_expr, active_expr, disabled_expr))
+        Some((normal_expr, active_expr, disabled_expr, transition_expr))
     }
 
     /// Try resolving an AST expression (literal, template literal, or ternary) into a style Expr
-    fn transform_class_expr(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>) -> Option<Expr> {
+    fn transform_class_expr(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>, is_pressable: bool) -> Option<Expr> {
         match expr {
             // 1. String literal: "p-4 bg-primary"
             Expr::Lit(Lit::Str(s)) => {
                 let s_str = s.value.as_str()?;
-                let (normal_expr, active_expr, disabled_expr) = self.resolve_class_string(s_str, disabled_prop_expr)?;
+                let (normal_expr, active_expr, disabled_expr, _transition_expr) = self.resolve_class_string(s_str, disabled_prop_expr)?;
                 self.build_combined_style_expr(
                     normal_expr.into_iter().collect(),
                     active_expr,
                     disabled_expr,
                     disabled_prop_expr,
+                    is_pressable,
                 )
             }
 
@@ -846,9 +1493,9 @@ impl<'a> CssTransformerVisitor<'a> {
                     static_classes.push(raw);
                 }
                 let static_str = static_classes.join(" ");
-                let (base_normal, base_active, base_disabled) = self
+                let (base_normal, base_active, base_disabled, _) = self
                     .resolve_class_string(&static_str, disabled_prop_expr)
-                    .unwrap_or((None, None, None));
+                    .unwrap_or((None, None, None, None));
 
                 let mut dynamic_exprs: Vec<Expr> = Vec::new();
                 if let Some(bn) = base_normal {
@@ -862,7 +1509,7 @@ impl<'a> CssTransformerVisitor<'a> {
                             let cons_expr = match &*cond.cons {
                                 Expr::Lit(Lit::Str(s)) => {
                                     if let Some(str_val) = s.value.as_str() {
-                                        if let Some((Some(e), _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
+                                        if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
                                             Some(e)
                                         } else {
                                             None
@@ -877,7 +1524,7 @@ impl<'a> CssTransformerVisitor<'a> {
                             let alt_expr = match &*cond.alt {
                                 Expr::Lit(Lit::Str(s)) => {
                                     if let Some(str_val) = s.value.as_str() {
-                                        if let Some((Some(e), _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
+                                        if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
                                             Some(e)
                                         } else {
                                             None
@@ -910,7 +1557,7 @@ impl<'a> CssTransformerVisitor<'a> {
                         Expr::Bin(bin) if bin.op == BinaryOp::LogicalAnd => {
                             if let Expr::Lit(Lit::Str(s)) = &*bin.right {
                                 if let Some(str_val) = s.value.as_str() {
-                                    if let Some((Some(r_expr), _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
+                                    if let Some((Some(r_expr), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
                                         dynamic_exprs.push(Expr::Bin(BinExpr {
                                             span: DUMMY_SP,
                                             op: BinaryOp::LogicalAnd,
@@ -935,6 +1582,7 @@ impl<'a> CssTransformerVisitor<'a> {
                     base_active,
                     base_disabled,
                     disabled_prop_expr,
+                    is_pressable,
                 )
             }
 
@@ -943,7 +1591,7 @@ impl<'a> CssTransformerVisitor<'a> {
                 let cons_expr = match &*cond.cons {
                     Expr::Lit(Lit::Str(s)) => {
                         if let Some(str_val) = s.value.as_str() {
-                            if let Some((Some(e), _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
+                            if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
                                 Some(e)
                             } else {
                                 None
@@ -958,7 +1606,7 @@ impl<'a> CssTransformerVisitor<'a> {
                 let alt_expr = match &*cond.alt {
                     Expr::Lit(Lit::Str(s)) => {
                         if let Some(str_val) = s.value.as_str() {
-                            if let Some((Some(e), _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
+                            if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
                                 Some(e)
                             } else {
                                 None
@@ -1000,8 +1648,9 @@ impl<'a> CssTransformerVisitor<'a> {
         active_expr: Option<Expr>,
         disabled_expr: Option<Expr>,
         disabled_prop_expr: Option<&Expr>,
+        is_pressable: bool,
     ) -> Option<Expr> {
-        let has_active = active_expr.is_some();
+        let has_active = active_expr.is_some() && is_pressable;
 
         // 1. Build normal style expression (single item or array)
         let normal_style_expr = if normal_exprs.len() == 1 {
@@ -1123,6 +1772,16 @@ impl<'a> CssTransformerVisitor<'a> {
 
 impl<'a> VisitMut for CssTransformerVisitor<'a> {
     fn visit_mut_jsx_opening_element(&mut self, opening: &mut JSXOpeningElement) {
+        let tag_name = match &opening.name {
+            JSXElementName::Ident(ident) => ident.sym.as_str().to_string(),
+            JSXElementName::JSXMemberExpr(mem) => mem.prop.sym.as_str().to_string(),
+            _ => String::new(),
+        };
+        let is_pressable = tag_name == "Pressable"
+            || tag_name == "TouchableOpacity"
+            || tag_name == "TouchableHighlight"
+            || tag_name == "TouchableWithoutFeedback";
+
         // First check if disabled prop is present on this element before visiting children
         let mut disabled_prop_expr = None;
         for attr in &opening.attrs {
@@ -1160,11 +1819,11 @@ impl<'a> VisitMut for CssTransformerVisitor<'a> {
                                 match val {
                                     JSXAttrValue::Str(s) => {
                                         let lit_expr = Expr::Lit(Lit::Str(s.clone()));
-                                        resolved_style_expr = self.transform_class_expr(&lit_expr, disabled_prop_expr.as_ref());
+                                        resolved_style_expr = self.transform_class_expr(&lit_expr, disabled_prop_expr.as_ref(), is_pressable);
                                     }
                                     JSXAttrValue::JSXExprContainer(c) => {
                                         if let JSXExpr::Expr(e) = &c.expr {
-                                            resolved_style_expr = self.transform_class_expr(e, disabled_prop_expr.as_ref());
+                                            resolved_style_expr = self.transform_class_expr(e, disabled_prop_expr.as_ref(), is_pressable);
                                         }
                                     }
                                     _ => {}
@@ -1248,6 +1907,11 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
         .and_then(|o| o.filename.clone())
         .unwrap_or_else(|| "input.tsx".to_string());
 
+    let enable_source_map = options
+        .as_ref()
+        .and_then(|o| o.source_maps)
+        .unwrap_or(true);
+
     let fm = cm.new_source_file(Lrc::new(FileName::Real(filename.clone().into())), code);
 
     let syntax = Syntax::Typescript(TsSyntax {
@@ -1281,6 +1945,7 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
     let mut visitor = CssTransformerVisitor {
         stylesheet: &stylesheet_index,
         collector: &mut collector,
+        has_animated_transition: false,
     };
     module.visit_mut_with(&mut visitor);
 
@@ -1395,14 +2060,24 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
         }
     }
 
-    // Codegen
+    // Codegen with SourceMap v3 support
     let mut buf = vec![];
+    let mut src_map_buf = vec![];
     {
         let mut emitter = Emitter {
             cfg: Config::default(),
             cm: cm.clone(),
             comments: None,
-            wr: JsWriter::new(cm.clone(), "\n", &mut buf, None),
+            wr: JsWriter::new(
+                cm.clone(),
+                "\n",
+                &mut buf,
+                if enable_source_map {
+                    Some(&mut src_map_buf)
+                } else {
+                    None
+                },
+            ),
         };
 
         emitter.emit_module(&module).map_err(|e| {
@@ -1420,15 +2095,199 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
         )
     })?;
 
+    let map_string = if enable_source_map {
+        let mut map_out = vec![];
+        let map_res = cm.build_source_map(&src_map_buf, None, DefaultSourceMapGenConfig);
+        if map_res.to_writer(&mut map_out).is_ok() {
+            String::from_utf8(map_out).ok()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     Ok(TransformOutput {
         code: transformed_code,
-        map: None,
+        map: map_string,
+    })
+}
+
+/// Dynamic runtime evaluator for class names & responsive styles in Rust
+#[napi]
+pub fn resolve_runtime_styles(
+    stylesheet_json: String,
+    class_names: String,
+    options: Option<RuntimeMatchOptions>,
+) -> Result<String> {
+    let index = StylesheetIndex::from_json_str(&stylesheet_json);
+    let classes: Vec<&str> = class_names.split_whitespace().collect();
+    let mut merged = HashMap::new();
+
+    let width = options.as_ref().and_then(|o| o.width).unwrap_or(375.0);
+    let _height = options.as_ref().and_then(|o| o.height).unwrap_or(812.0);
+    let color_scheme = options.as_ref().and_then(|o| o.color_scheme.as_deref()).unwrap_or("light");
+
+    for cls in classes {
+        // Handle media query / dark mode prefix
+        if cls.starts_with("dark:") {
+            if color_scheme == "dark" {
+                let base = &cls[5..];
+                if let Some(props) = index.get_class_style(base) {
+                    for (k, v) in props {
+                        merged.insert(k, v);
+                    }
+                }
+            }
+            continue;
+        }
+
+        if cls.starts_with("light:") {
+            if color_scheme == "light" {
+                let base = &cls[6..];
+                if let Some(props) = index.get_class_style(base) {
+                    for (k, v) in props {
+                        merged.insert(k, v);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Responsive breakpoints: sm (640), md (768), lg (1024), xl (1280), 2xl (1536)
+        if cls.starts_with("sm:") {
+            if width >= 640.0 {
+                if let Some(props) = index.get_class_style(&cls[3..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+        if cls.starts_with("md:") {
+            if width >= 768.0 {
+                if let Some(props) = index.get_class_style(&cls[3..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+        if cls.starts_with("lg:") {
+            if width >= 1024.0 {
+                if let Some(props) = index.get_class_style(&cls[3..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+        if cls.starts_with("xl:") {
+            if width >= 1280.0 {
+                if let Some(props) = index.get_class_style(&cls[3..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+        if cls.starts_with("2xl:") {
+            if width >= 1536.0 {
+                if let Some(props) = index.get_class_style(&cls[4..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+
+        if let Some(props) = index.get_class_style(cls) {
+            for (k, v) in props {
+                merged.insert(k, v);
+            }
+        }
+    }
+
+    serde_json::to_string(&merged).map_err(|e| {
+        Error::new(Status::GenericFailure, format!("Serialization error: {}", e))
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_transform_with_sourcemap_v3() {
+        let code = r##"
+            import { View } from "react-native";
+            export function Box() {
+                return <View className="p-4 bg-primary" />;
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            ":root": {
+                "--color-primary": "#0065d6"
+            },
+            "p-4": { "_static": { "padding": 16 } },
+            "bg-primary": { "_dynamic": { "backgroundColor": "var(--color-primary)" } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Box.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            source_maps: Some(true),
+        })).unwrap();
+
+        assert!(res.code.contains("StyleSheet.create"));
+        assert!(res.code.contains("_rnStyles"));
+        assert!(res.map.is_some());
+        let map_str = res.map.unwrap();
+        assert!(map_str.contains("\"version\":3"));
+        assert!(map_str.contains("\"sources\":[\"Box.tsx\"]"));
+    }
+
+    #[test]
+    fn test_color_mix_and_oklch_support() {
+        let sheet_json = r##"{
+            ":root": {
+                "--base": "oklch(0.6 0.25 150)",
+                "--accent": "color-mix(in srgb, #ff0000 70%, #0000ff 30%)"
+            },
+            "bg-base": { "_dynamic": { "backgroundColor": "var(--base)" } },
+            "bg-accent": { "_dynamic": { "backgroundColor": "var(--accent)" } },
+            "fade": { "_dynamic": { "color": "color-mix(in srgb, var(--accent) 50%, transparent)" } }
+        }"##.to_string();
+
+        let index = StylesheetIndex::from_json_str(&sheet_json);
+        let base_style = index.get_class_style("bg-base").unwrap();
+        assert!(base_style.get("backgroundColor").is_some());
+
+        let accent_style = index.get_class_style("bg-accent").unwrap();
+        assert!(accent_style.get("backgroundColor").is_some());
+
+        let accent_color = accent_style.get("backgroundColor").unwrap().as_str().unwrap();
+        assert!(accent_color.starts_with("#"));
+    }
+
+    #[test]
+    fn test_runtime_responsive_media_and_dark_mode() {
+        let sheet_json = r##"{
+            "text-base": { "_static": { "fontSize": 16 } },
+            "text-lg": { "_static": { "fontSize": 18 } },
+            "bg-light": { "_static": { "backgroundColor": "#ffffff" } },
+            "bg-dark": { "_static": { "backgroundColor": "#000000" } }
+        }"##.to_string();
+
+        let dark_res = resolve_runtime_styles(
+            sheet_json.clone(),
+            "text-base md:text-lg dark:bg-dark light:bg-light".to_string(),
+            Some(RuntimeMatchOptions {
+                width: Some(800.0),
+                height: Some(600.0),
+                color_scheme: Some("dark".to_string()),
+            }),
+        ).unwrap();
+
+        assert!(dark_res.contains("fontSize\":18"));
+        assert!(dark_res.contains("backgroundColor\":\"#000000\""));
+    }
 
     #[test]
     fn test_transform_active_pressable() {
@@ -1455,9 +2314,9 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Button.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            source_maps: Some(false),
         })).unwrap();
 
-        println!("ACTIVE RESULT:\n{}", res.code);
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles"));
         assert!(res.code.contains("pressed"));
@@ -1492,9 +2351,9 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Key.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            source_maps: Some(false),
         })).unwrap();
 
-        println!("TEMPLATE RESULT:\n{}", res.code);
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles"));
         assert!(res.code.contains("isActive ? _rnStyles."));
@@ -1537,16 +2396,16 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Button.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            source_maps: Some(false),
         })).unwrap();
 
-        println!("DISABLED RESULT:\n{}", res.code);
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("isDisabled"));
         assert!(res.code.contains("pressed && !isDisabled"));
     }
 
     #[test]
-    fn test_group_not_inlined_statically() {
+    fn test_group_and_children_static_transformation() {
         let code = r##"
             import { View, Pressable } from "react-native";
             export function Card() {
@@ -1569,11 +2428,54 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Card.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            source_maps: Some(false),
         })).unwrap();
 
-        println!("GROUP RESULT:\n{}", res.code);
-        // group container and group-active child should retain className for runtime cssInterop
-        assert!(res.code.contains("className=\"group"));
-        assert!(res.code.contains("group-active:bg-yellow-500"));
+        assert!(res.code.contains("StyleSheet.create"));
+        assert!(res.code.contains("_rnStyles._s0"));
+        assert!(res.code.contains("_rnStyles._s1"));
+    }
+
+    #[test]
+    fn test_shorthand_spacing_and_border_transform() {
+        let code = r##"
+            import { View } from "react-native";
+            export function Box() {
+                return (
+                    <View className="custom-box" />
+                );
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "custom-box": {
+                "_static": {
+                    "padding": "1rem 20px",
+                    "margin": "10px",
+                    "border": "2px solid #ff0000",
+                    "paddingInline": "12px",
+                    "transform": "translateX(10px) rotate(45deg)"
+                }
+            }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Box.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            source_maps: Some(false),
+        })).unwrap();
+
+        assert!(res.code.contains("StyleSheet.create"));
+        assert!(res.code.contains("paddingTop: 16"));
+        assert!(res.code.contains("paddingRight: 20"));
+        assert!(res.code.contains("paddingBottom: 16"));
+        assert!(res.code.contains("paddingLeft: 20"));
+        assert!(res.code.contains("marginTop: 10"));
+        assert!(res.code.contains("borderWidth: 2"));
+        assert!(res.code.contains("borderStyle: \"solid\""));
+        assert!(res.code.contains("borderColor: \"#ff0000\""));
+        assert!(res.code.contains("paddingHorizontal: 12"));
+        assert!(res.code.contains("translateX: 10"));
+        assert!(res.code.contains("rotate: \"45deg\""));
     }
 }

@@ -12,10 +12,13 @@
 Modern React Native apps need the ergonomics of Tailwind CSS v4 and standard CSS without sacrificing runtime performance. `@colorye/react-native-css` compiles utility classes directly into **hoisted `StyleSheet.create` objects (`_rnStyles`)** using a native Rust SWC transform layer.
 
 - 🦀 **Rust SWC Compiler**: Transforms JSX at native speeds, hoisting static styles to `StyleSheet.create` with **zero runtime overhead**.
+- 🗺️ **SourceMap v3 Fidelity**: Full source mapping support for accurate line-and-column stack traces in Metro / React Native debugger.
 - 🎨 **Tailwind CSS v4 Native**: Full support for CSS-first config, `@theme`, `oklch()`, `lab()`, CSS custom properties (`var()`), and nested `calc()`.
 - ⚡ **Optimized Dynamic States**: Pseudo-classes like `active:`, `pressed:`, and `disabled:` compile to optimized React Native Pressable render callbacks.
+- 🎬 **Transition & Animation**: Support for `duration-`, `ease-`, and `delay-` utility mappings.
 - 🌳 **Group States & Text Inheritance**: Native coordination for `group` / `group-active:` and CSS text style inheritance (`color`, `fontSize`, `fontWeight`, etc.).
 - 🔄 **Component Interoperability**: First-class `cssInterop` and `remapProps` for third-party libraries (`FlashList`, `TrueSheet`, etc.).
+- 🌍 **Multi-platform N-API Prebuilds**: Zero-setup binaries across macOS (Apple Silicon & Intel), Linux (GNU & musl, x64 & arm64), and Windows (x64 & arm64).
 
 ---
 
