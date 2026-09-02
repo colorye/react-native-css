@@ -93,7 +93,9 @@ jobs:
     name: Publish to npm and GitHub Release
     needs: build-artifacts
     runs-on: ubuntu-latest
-    environment: npm
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,9 +128,12 @@ jobs:
         run: yarn build:js
 
       - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
+            npm publish --provenance --access public --//registry.npmjs.org/:_authToken="${{ secrets.NPM_TOKEN }}"
+          else
+            npm publish --provenance --access public
+          fi
 
       - name: Create GitHub Release
         env:
