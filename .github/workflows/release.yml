@@ -17,7 +17,7 @@ concurrency:
 
 permissions:
   contents: write
-    id-token: write
+  id-token: write
 
 jobs:
   test:
@@ -41,14 +41,20 @@ jobs:
         include:
           - target: aarch64-apple-darwin
             os: macos-latest
+            artifact_name: transformer.darwin-arm64.node
+            source_lib: crates/transformer/target/aarch64-apple-darwin/release/libcolorye_react_native_css_transformer.dylib
           - target: x86_64-apple-darwin
             os: macos-latest
+            artifact_name: transformer.darwin-x64.node
+            source_lib: crates/transformer/target/x86_64-apple-darwin/release/libcolorye_react_native_css_transformer.dylib
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            artifact_name: transformer.linux-x64-gnu.node
+            source_lib: crates/transformer/target/x86_64-unknown-linux-gnu/release/libcolorye_react_native_css_transformer.so
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            artifact_name: transformer.win32-x64-msvc.node
+            source_lib: crates/transformer/target/x86_64-pc-windows-msvc/release/colorye_react_native_css_transformer.dll
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -57,10 +63,31 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
       - name: Build target
         run: |
           cd crates/transformer
           cargo build --release --target ${{ matrix.target }}
+
+      - name: Copy & Prepare Node binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p native-bin
+          cp ${{ matrix.source_lib }} native-bin/${{ matrix.artifact_name }}
+
+      - name: Copy & Prepare Node binary (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p native-bin
+          cp ${{ matrix.source_lib }} native-bin/${{ matrix.artifact_name }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: native-bin/${{ matrix.artifact_name }}
+          if-no-files-found: error
 
   publish:
     name: Publish to npm and GitHub Release
@@ -76,6 +103,16 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+
+      - name: Download all native binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: crates/transformer/
+          merge-multiple: true
+
+      - name: Inspect downloaded binaries
+        run: |
+          ls -la crates/transformer/*.node || true
 
       - name: Install
         run: yarn install --immutable || yarn install

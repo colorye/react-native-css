@@ -4,11 +4,9 @@ const { join } = require("path");
 const { platform, arch } = process;
 
 let nativeBinding = null;
-let localFileExisted = false;
 let loadError = null;
 
 function isMusl() {
-  // For Node 10
   if (!process.report || typeof process.report.getReport !== "function") {
     try {
       const lddPath = require("child_process").execSync("which ldd").toString().trim();
@@ -22,190 +20,82 @@ function isMusl() {
   }
 }
 
-switch (platform) {
-  case "android":
-    switch (arch) {
-      case "arm64":
-        localFileExisted = existsSync(join(__dirname, "transformer.android-arm64.node"));
-        try {
-          if (localFileExisted) {
-            nativeBinding = require("./transformer.android-arm64.node");
-          } else {
-            nativeBinding = require("@colorye/react-native-css-android-arm64");
-          }
-        } catch (e) {
-          loadError = e;
+// 1. Resolve candidate binary filename for current OS & architecture
+function getCandidateFilenames() {
+  const candidates = [];
+
+  switch (platform) {
+    case "darwin":
+      if (arch === "arm64") {
+        candidates.push("transformer.darwin-arm64.node");
+      } else if (arch === "x64") {
+        candidates.push("transformer.darwin-x64.node");
+      }
+      candidates.push("transformer.darwin-universal.node");
+      break;
+
+    case "linux":
+      if (arch === "x64") {
+        if (isMusl()) {
+          candidates.push("transformer.linux-x64-musl.node");
+        } else {
+          candidates.push("transformer.linux-x64-gnu.node");
         }
-        break;
-      case "arm":
-        localFileExisted = existsSync(join(__dirname, "transformer.android-arm-eabi.node"));
-        try {
-          if (localFileExisted) {
-            nativeBinding = require("./transformer.android-arm-eabi.node");
-          } else {
-            nativeBinding = require("@colorye/react-native-css-android-arm-eabi");
-          }
-        } catch (e) {
-          loadError = e;
+      } else if (arch === "arm64") {
+        if (isMusl()) {
+          candidates.push("transformer.linux-arm64-musl.node");
+        } else {
+          candidates.push("transformer.linux-arm64-gnu.node");
         }
-        break;
-      default:
-        throw new Error(`Unsupported architecture on Android ${arch}`);
-    }
-    break;
-  case "win32":
-    switch (arch) {
-      case "x64":
-        localFileExisted = existsSync(join(__dirname, "transformer.win32-x64-msvc.node"));
-        try {
-          if (localFileExisted) {
-            nativeBinding = require("./transformer.win32-x64-msvc.node");
-          } else {
-            nativeBinding = require("@colorye/react-native-css-win32-x64-msvc");
-          }
-        } catch (e) {
-          loadError = e;
-        }
-        break;
-      case "arm64":
-        localFileExisted = existsSync(join(__dirname, "transformer.win32-arm64-msvc.node"));
-        try {
-          if (localFileExisted) {
-            nativeBinding = require("./transformer.win32-arm64-msvc.node");
-          } else {
-            nativeBinding = require("@colorye/react-native-css-win32-arm64-msvc");
-          }
-        } catch (e) {
-          loadError = e;
-        }
-        break;
-      default:
-        throw new Error(`Unsupported architecture on Windows: ${arch}`);
-    }
-    break;
-  case "darwin":
-    localFileExisted = existsSync(join(__dirname, "transformer.darwin-universal.node"));
-    try {
-      if (localFileExisted) {
-        nativeBinding = require("./transformer.darwin-universal.node");
-      } else {
-        nativeBinding = require("@colorye/react-native-css-darwin-universal");
       }
       break;
-    } catch {}
-    switch (arch) {
-      case "x64":
-        localFileExisted = existsSync(join(__dirname, "transformer.darwin-x64.node"));
-        try {
-          if (localFileExisted) {
-            nativeBinding = require("./transformer.darwin-x64.node");
-          } else {
-            nativeBinding = require("@colorye/react-native-css-darwin-x64");
-          }
-        } catch (e) {
-          loadError = e;
-        }
-        break;
-      case "arm64":
-        localFileExisted = existsSync(join(__dirname, "transformer.darwin-arm64.node"));
-        try {
-          if (localFileExisted) {
-            nativeBinding = require("./transformer.darwin-arm64.node");
-          } else {
-            nativeBinding = require("@colorye/react-native-css-darwin-arm64");
-          }
-        } catch (e) {
-          loadError = e;
-        }
-        break;
-      default:
-        throw new Error(`Unsupported architecture on macOS: ${arch}`);
-    }
-    break;
-  case "freebsd":
-    if (arch !== "x64") {
-      throw new Error(`Unsupported architecture on FreeBSD: ${arch}`);
-    }
-    localFileExisted = existsSync(join(__dirname, "transformer.freebsd-x64.node"));
-    try {
-      if (localFileExisted) {
-        nativeBinding = require("./transformer.freebsd-x64.node");
-      } else {
-        nativeBinding = require("@colorye/react-native-css-freebsd-x64");
+
+    case "win32":
+      if (arch === "x64") {
+        candidates.push("transformer.win32-x64-msvc.node");
+      } else if (arch === "arm64") {
+        candidates.push("transformer.win32-arm64-msvc.node");
       }
+      break;
+
+    case "android":
+      if (arch === "arm64") {
+        candidates.push("transformer.android-arm64.node");
+      } else if (arch === "arm") {
+        candidates.push("transformer.android-arm-eabi.node");
+      }
+      break;
+  }
+
+  // Generic local fallback (built by `cargo build --release`)
+  candidates.push("transformer.node");
+
+  return candidates;
+}
+
+// 2. Load the first matching candidate file from inside this package
+for (const file of getCandidateFilenames()) {
+  const fullPath = join(__dirname, file);
+  if (existsSync(fullPath)) {
+    try {
+      nativeBinding = require(`./${file}`);
+      break;
     } catch (e) {
       loadError = e;
     }
-    break;
-  case "linux":
-    switch (arch) {
-      case "x64":
-        if (isMusl()) {
-          localFileExisted = existsSync(join(__dirname, "transformer.linux-x64-musl.node"));
-          try {
-            if (localFileExisted) {
-              nativeBinding = require("./transformer.linux-x64-musl.node");
-            } else {
-              nativeBinding = require("@colorye/react-native-css-linux-x64-musl");
-            }
-          } catch (e) {
-            loadError = e;
-          }
-        } else {
-          localFileExisted = existsSync(join(__dirname, "transformer.linux-x64-gnu.node"));
-          try {
-            if (localFileExisted) {
-              nativeBinding = require("./transformer.linux-x64-gnu.node");
-            } else {
-              nativeBinding = require("@colorye/react-native-css-linux-x64-gnu");
-            }
-          } catch (e) {
-            loadError = e;
-          }
-        }
-        break;
-      case "arm64":
-        if (isMusl()) {
-          localFileExisted = existsSync(join(__dirname, "transformer.linux-arm64-musl.node"));
-          try {
-            if (localFileExisted) {
-              nativeBinding = require("./transformer.linux-arm64-musl.node");
-            } else {
-              nativeBinding = require("@colorye/react-native-css-linux-arm64-musl");
-            }
-          } catch (e) {
-            loadError = e;
-          }
-        } else {
-          localFileExisted = existsSync(join(__dirname, "transformer.linux-arm64-gnu.node"));
-          try {
-            if (localFileExisted) {
-              nativeBinding = require("./transformer.linux-arm64-gnu.node");
-            } else {
-              nativeBinding = require("@colorye/react-native-css-linux-arm64-gnu");
-            }
-          } catch (e) {
-            loadError = e;
-          }
-        }
-        break;
-      default:
-        throw new Error(`Unsupported architecture on Linux: ${arch}`);
-    }
-    break;
-  default:
-    throw new Error(`Unsupported OS: ${platform}, architecture: ${arch}`);
+  }
 }
 
 if (!nativeBinding) {
-  // Local development fallback
+  // If no candidate succeeded, try direct require of fallback
   try {
     nativeBinding = require("./transformer.node");
   } catch (e) {
-    if (loadError) {
-      throw loadError;
-    }
-    throw e;
+    const errorMsg =
+      `Failed to load native binding for @colorye/react-native-css on ${platform}-${arch}.\n` +
+      `Ensure that transformer.node or transformer.${platform}-${arch}.node exists in ${__dirname}.\n` +
+      (loadError ? `Original error: ${loadError.message}` : "");
+    throw new Error(errorMsg);
   }
 }
 

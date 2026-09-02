@@ -1,5 +1,5 @@
 import React, { createContext, forwardRef, useContext } from "react";
-import Runtime from "./transformer-runtime";
+import Runtime from "./transformer-runtime.js";
 
 export const InheritContext = createContext(undefined);
 export const GroupContext = createContext({ pressed: false, hovered: false, focus: false });

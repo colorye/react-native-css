@@ -5,8 +5,8 @@ export {
   getGlobalStylesheet,
   remapProps,
   setGlobalStylesheet,
-} from "./interop";
-export { default as Runtime } from "./transformer-runtime";
+} from "./interop.js";
+export { default as Runtime } from "./transformer-runtime.js";
 
 import {
   GroupContext,
@@ -15,8 +15,8 @@ import {
   getGlobalStylesheet,
   remapProps,
   setGlobalStylesheet,
-} from "./interop";
-import Runtime from "./transformer-runtime";
+} from "./interop.js";
+import Runtime from "./transformer-runtime.js";
 
 export default {
   cssInterop,

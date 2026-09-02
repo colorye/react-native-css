@@ -46,8 +46,8 @@ Object.defineProperty(exports, "setGlobalStylesheet", {
     return _interop.setGlobalStylesheet;
   }
 });
-var _interop = require("./interop");
-var _transformerRuntime = _interopRequireDefault(require("./transformer-runtime"));
+var _interop = require("./interop.js");
+var _transformerRuntime = _interopRequireDefault(require("./transformer-runtime.js"));
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 var _default = exports["default"] = {
   cssInterop: _interop.cssInterop,

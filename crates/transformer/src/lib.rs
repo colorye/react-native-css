@@ -1370,6 +1370,8 @@ struct CssTransformerVisitor<'a> {
     stylesheet: &'a StylesheetIndex,
     collector: &'a mut StyleSheetCollector,
     has_animated_transition: bool,
+    group_depth: usize,
+    group_active_used: bool,
 }
 
 impl<'a> CssTransformerVisitor<'a> {
@@ -1378,7 +1380,7 @@ impl<'a> CssTransformerVisitor<'a> {
         &mut self,
         class_str: &str,
         disabled_prop_expr: Option<&Expr>,
-    ) -> Option<(Option<Expr>, Option<Expr>, Option<Expr>, Option<Expr>)> {
+    ) -> Option<(Option<Expr>, Option<Expr>, Option<Expr>, Option<Expr>, Option<Expr>)> {
         let classes: Vec<&str> = class_str.split_whitespace().collect();
         if classes.is_empty() {
             return None;
@@ -1386,16 +1388,17 @@ impl<'a> CssTransformerVisitor<'a> {
 
         let mut normal_classes = Vec::new();
         let mut active_classes = Vec::new();
+        let mut group_active_classes = Vec::new();
         let mut disabled_classes = Vec::new();
         let mut transition_classes = Vec::new();
 
         for cls in classes {
-            if cls == "group" {
+            if cls == "group" || cls.starts_with("group/") {
                 continue;
             } else if let Some(rest) = cls.strip_prefix("active:").or_else(|| cls.strip_prefix("pressed:")) {
                 active_classes.push(rest);
             } else if let Some(rest) = cls.strip_prefix("group-active:").or_else(|| cls.strip_prefix("group-pressed:")) {
-                active_classes.push(rest);
+                group_active_classes.push(rest);
             } else if let Some(rest) = cls.strip_prefix("disabled:") {
                 disabled_classes.push(rest);
             } else if cls.starts_with("transition") || cls.starts_with("duration-") || cls.starts_with("ease-") || cls.starts_with("delay-") {
@@ -1442,6 +1445,14 @@ impl<'a> CssTransformerVisitor<'a> {
             None
         };
 
+        let group_active_expr = if !group_active_classes.is_empty() {
+            let map = self.stylesheet.compute_static_styles(&group_active_classes.join(" "))?;
+            let id = self.collector.get_or_insert(JsonValue::Object(map.into_iter().collect()));
+            Some(self.collector.to_member_expr(&id))
+        } else {
+            None
+        };
+
         let disabled_expr = if !disabled_classes.is_empty() {
             let map = self.stylesheet.compute_static_styles(&disabled_classes.join(" "))?;
             let id = self.collector.get_or_insert(JsonValue::Object(map.into_iter().collect()));
@@ -1462,161 +1473,36 @@ impl<'a> CssTransformerVisitor<'a> {
             None
         };
 
-        if normal_expr.is_none() && active_expr.is_none() && disabled_expr.is_none() {
+        if normal_expr.is_none() && active_expr.is_none() && group_active_expr.is_none() && disabled_expr.is_none() {
             return None;
         }
 
-        Some((normal_expr, active_expr, disabled_expr, transition_expr))
+        Some((normal_expr, active_expr, group_active_expr, disabled_expr, transition_expr))
     }
 
-    /// Try resolving an AST expression (literal, template literal, or ternary) into a style Expr
-    fn transform_class_expr(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>, is_pressable: bool) -> Option<Expr> {
+    /// Recursively resolve dynamic branches (nested ternaries, binary ANDs, parens, string literals)
+    fn transform_dynamic_branch(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>) -> Option<Expr> {
         match expr {
-            // 1. String literal: "p-4 bg-primary"
+            // String literal: "bg-blue-500 border-green-500"
             Expr::Lit(Lit::Str(s)) => {
                 let s_str = s.value.as_str()?;
-                let (normal_expr, active_expr, disabled_expr, _transition_expr) = self.resolve_class_string(s_str, disabled_prop_expr)?;
-                self.build_combined_style_expr(
-                    normal_expr.into_iter().collect(),
-                    active_expr,
-                    disabled_expr,
-                    disabled_prop_expr,
-                    is_pressable,
-                )
+                let (normal, _, _, _, _) = self.resolve_class_string(s_str, disabled_prop_expr)?;
+                normal
             }
 
-            // 2. Template literal: `p-4 items-center ${isActive ? "bg-primary" : "bg-black"}`
-            Expr::Tpl(tpl) => {
-                let mut static_classes = Vec::new();
-                for quasi in &tpl.quasis {
-                    let raw = quasi.raw.as_str();
-                    static_classes.push(raw);
-                }
-                let static_str = static_classes.join(" ");
-                let (base_normal, base_active, base_disabled, _) = self
-                    .resolve_class_string(&static_str, disabled_prop_expr)
-                    .unwrap_or((None, None, None, None));
-
-                let mut dynamic_exprs: Vec<Expr> = Vec::new();
-                if let Some(bn) = base_normal {
-                    dynamic_exprs.push(bn);
-                }
-
-                for dynamic_part in &tpl.exprs {
-                    match &**dynamic_part {
-                        // Ternary inside template: isActive ? "bg-primary" : "bg-black"
-                        Expr::Cond(cond) => {
-                            let cons_expr = match &*cond.cons {
-                                Expr::Lit(Lit::Str(s)) => {
-                                    if let Some(str_val) = s.value.as_str() {
-                                        if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
-                                            Some(e)
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }
-                                _ => None,
-                            };
-
-                            let alt_expr = match &*cond.alt {
-                                Expr::Lit(Lit::Str(s)) => {
-                                    if let Some(str_val) = s.value.as_str() {
-                                        if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
-                                            Some(e)
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                }
-                                _ => None,
-                            };
-
-                            if cons_expr.is_some() || alt_expr.is_some() {
-                                let cons_ast = cons_expr.unwrap_or_else(|| {
-                                    Expr::Lit(Lit::Null(swc_core::ecma::ast::Null { span: DUMMY_SP }))
-                                });
-                                let alt_ast = alt_expr.unwrap_or_else(|| {
-                                    Expr::Lit(Lit::Null(swc_core::ecma::ast::Null { span: DUMMY_SP }))
-                                });
-
-                                dynamic_exprs.push(Expr::Cond(CondExpr {
-                                    span: DUMMY_SP,
-                                    test: cond.test.clone(),
-                                    cons: Box::new(cons_ast),
-                                    alt: Box::new(alt_ast),
-                                }));
-                            }
-                        }
-
-                        // Logical AND inside template: isActive && "bg-primary"
-                        Expr::Bin(bin) if bin.op == BinaryOp::LogicalAnd => {
-                            if let Expr::Lit(Lit::Str(s)) = &*bin.right {
-                                if let Some(str_val) = s.value.as_str() {
-                                    if let Some((Some(r_expr), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
-                                        dynamic_exprs.push(Expr::Bin(BinExpr {
-                                            span: DUMMY_SP,
-                                            op: BinaryOp::LogicalAnd,
-                                            left: bin.left.clone(),
-                                            right: Box::new(r_expr),
-                                        }));
-                                    }
-                                }
-                            }
-                        }
-
-                        _ => {}
-                    }
-                }
-
-                if dynamic_exprs.is_empty() && base_active.is_none() && base_disabled.is_none() {
-                    return None;
-                }
-
-                self.build_combined_style_expr(
-                    dynamic_exprs,
-                    base_active,
-                    base_disabled,
-                    disabled_prop_expr,
-                    is_pressable,
-                )
+            // Parenthesized expression: (a ? "bg-1" : "bg-2")
+            Expr::Paren(p) => {
+                let inner = self.transform_dynamic_branch(&p.expr, disabled_prop_expr)?;
+                Some(Expr::Paren(ParenExpr {
+                    span: DUMMY_SP,
+                    expr: Box::new(inner),
+                }))
             }
 
-            // 3. Direct Ternary: className={isActive ? "bg-primary" : "bg-black"}
+            // Ternary expression (handles arbitrary nesting in cons or alt)
             Expr::Cond(cond) => {
-                let cons_expr = match &*cond.cons {
-                    Expr::Lit(Lit::Str(s)) => {
-                        if let Some(str_val) = s.value.as_str() {
-                            if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
-                                Some(e)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
-
-                let alt_expr = match &*cond.alt {
-                    Expr::Lit(Lit::Str(s)) => {
-                        if let Some(str_val) = s.value.as_str() {
-                            if let Some((Some(e), _, _, _)) = self.resolve_class_string(str_val, disabled_prop_expr) {
-                                Some(e)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                };
+                let cons_expr = self.transform_dynamic_branch(&cond.cons, disabled_prop_expr);
+                let alt_expr = self.transform_dynamic_branch(&cond.alt, disabled_prop_expr);
 
                 if cons_expr.is_some() || alt_expr.is_some() {
                     let cons_ast = cons_expr.unwrap_or_else(|| {
@@ -1637,20 +1523,103 @@ impl<'a> CssTransformerVisitor<'a> {
                 }
             }
 
+            // Logical AND expression: isActive && "bg-primary"
+            Expr::Bin(bin) if bin.op == BinaryOp::LogicalAnd => {
+                let right_expr = self.transform_dynamic_branch(&bin.right, disabled_prop_expr)?;
+                Some(Expr::Bin(BinExpr {
+                    span: DUMMY_SP,
+                    op: BinaryOp::LogicalAnd,
+                    left: bin.left.clone(),
+                    right: Box::new(right_expr),
+                }))
+            }
+
+            // Pass-through identifiers (e.g. dynamic class variable)
+            Expr::Ident(ident) => Some(Expr::Ident(ident.clone())),
+
+            _ => None,
+        }
+    }
+
+    /// Try resolving an AST expression (literal, template literal, or ternary) into a style Expr
+    fn transform_class_expr(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>, is_pressable: bool) -> Option<Expr> {
+        match expr {
+            // 1. String literal: "p-4 bg-primary"
+            Expr::Lit(Lit::Str(s)) => {
+                let s_str = s.value.as_str()?;
+                let (normal_expr, active_expr, group_active_expr, disabled_expr, _transition_expr) = self.resolve_class_string(s_str, disabled_prop_expr)?;
+                self.build_combined_style_expr(
+                    normal_expr.into_iter().collect(),
+                    active_expr,
+                    group_active_expr,
+                    disabled_expr,
+                    disabled_prop_expr,
+                    is_pressable,
+                )
+            }
+
+            // 2. Template literal: `p-4 items-center ${isActive ? "bg-primary" : "bg-black"}`
+            Expr::Tpl(tpl) => {
+                let mut static_classes = Vec::new();
+                for quasi in &tpl.quasis {
+                    let raw = quasi.raw.as_str();
+                    static_classes.push(raw);
+                }
+                let static_str = static_classes.join(" ");
+                let (base_normal, base_active, base_group_active, base_disabled, _) = self
+                    .resolve_class_string(&static_str, disabled_prop_expr)
+                    .unwrap_or((None, None, None, None, None));
+
+                let mut dynamic_exprs: Vec<Expr> = Vec::new();
+                if let Some(bn) = base_normal {
+                    dynamic_exprs.push(bn);
+                }
+
+                for dynamic_part in &tpl.exprs {
+                    if let Some(dyn_expr) = self.transform_dynamic_branch(dynamic_part, disabled_prop_expr) {
+                        dynamic_exprs.push(dyn_expr);
+                    }
+                }
+
+                if dynamic_exprs.is_empty() && base_active.is_none() && base_group_active.is_none() && base_disabled.is_none() {
+                    return None;
+                }
+
+                self.build_combined_style_expr(
+                    dynamic_exprs,
+                    base_active,
+                    base_group_active,
+                    base_disabled,
+                    disabled_prop_expr,
+                    is_pressable,
+                )
+            }
+
+            // 3. Direct Ternary or Logical expression: className={isActive ? "bg-primary" : "bg-black"}
+            Expr::Cond(_) | Expr::Bin(_) | Expr::Paren(_) => {
+                self.transform_dynamic_branch(expr, disabled_prop_expr)
+            }
+
             _ => None,
         }
     }
 
     /// Build combined style expression (wrapping with ({ pressed }) => [...] if active styles exist)
     fn build_combined_style_expr(
-        &self,
+        &mut self,
         normal_exprs: Vec<Expr>,
         active_expr: Option<Expr>,
+        group_active_expr: Option<Expr>,
         disabled_expr: Option<Expr>,
         disabled_prop_expr: Option<&Expr>,
         is_pressable: bool,
     ) -> Option<Expr> {
         let has_active = active_expr.is_some() && is_pressable;
+        let has_group_active = group_active_expr.is_some() && self.group_depth > 0;
+
+        if has_group_active {
+            self.group_active_used = true;
+        }
 
         // 1. Build normal style expression (single item or array)
         let normal_style_expr = if normal_exprs.len() == 1 {
@@ -1687,7 +1656,7 @@ impl<'a> CssTransformerVisitor<'a> {
                 Expr::Bin(BinExpr {
                     span: DUMMY_SP,
                     op: BinaryOp::LogicalAnd,
-                    left: Box::new(Expr::Ident(pressed_ident)),
+                    left: Box::new(Expr::Ident(pressed_ident.clone())),
                     right: Box::new(Expr::Unary(UnaryExpr {
                         span: DUMMY_SP,
                         op: UnaryOp::Bang,
@@ -1695,7 +1664,7 @@ impl<'a> CssTransformerVisitor<'a> {
                     })),
                 })
             } else {
-                Expr::Ident(pressed_ident)
+                Expr::Ident(pressed_ident.clone())
             };
 
             let mut array_elems = vec![
@@ -1713,6 +1682,18 @@ impl<'a> CssTransformerVisitor<'a> {
                     })),
                 }),
             ];
+
+            if let Some(grp_ast) = group_active_expr {
+                array_elems.push(Some(ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Bin(BinExpr {
+                        span: DUMMY_SP,
+                        op: BinaryOp::LogicalAnd,
+                        left: Box::new(Expr::Ident(pressed_ident)),
+                        right: Box::new(grp_ast),
+                    })),
+                }));
+            }
 
             if let (Some(dis_ast), Some(dis_prop)) = (disabled_expr, disabled_prop_expr) {
                 array_elems.push(Some(ExprOrSpread {
@@ -1740,6 +1721,43 @@ impl<'a> CssTransformerVisitor<'a> {
                 type_params: None,
                 return_type: None,
                 ctxt: Default::default(),
+            }))
+        } else if has_group_active {
+            // Non-pressable child inside a group: uses `pressed` from parent render prop
+            let grp_ast = group_active_expr.unwrap();
+            let pressed_ident = Ident::new_no_ctxt("pressed".into(), DUMMY_SP);
+
+            let mut array_elems = vec![
+                Some(ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(normal_style_expr),
+                }),
+                Some(ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Bin(BinExpr {
+                        span: DUMMY_SP,
+                        op: BinaryOp::LogicalAnd,
+                        left: Box::new(Expr::Ident(pressed_ident)),
+                        right: Box::new(grp_ast),
+                    })),
+                }),
+            ];
+
+            if let (Some(dis_ast), Some(dis_prop)) = (disabled_expr, disabled_prop_expr) {
+                array_elems.push(Some(ExprOrSpread {
+                    spread: None,
+                    expr: Box::new(Expr::Bin(BinExpr {
+                        span: DUMMY_SP,
+                        op: BinaryOp::LogicalAnd,
+                        left: Box::new(dis_prop.clone()),
+                        right: Box::new(dis_ast),
+                    })),
+                }));
+            }
+
+            Some(Expr::Array(ArrayLit {
+                span: DUMMY_SP,
+                elems: array_elems,
             }))
         } else if let Some(dis_ast) = disabled_expr {
             if let Some(dis_prop) = disabled_prop_expr {
@@ -1771,6 +1789,100 @@ impl<'a> CssTransformerVisitor<'a> {
 }
 
 impl<'a> VisitMut for CssTransformerVisitor<'a> {
+    fn visit_mut_jsx_element(&mut self, el: &mut JSXElement) {
+        let tag_name = match &el.opening.name {
+            JSXElementName::Ident(ident) => ident.sym.as_str().to_string(),
+            JSXElementName::JSXMemberExpr(mem) => mem.prop.sym.as_str().to_string(),
+            _ => String::new(),
+        };
+        let is_pressable = tag_name == "Pressable"
+            || tag_name == "TouchableOpacity"
+            || tag_name == "TouchableHighlight"
+            || tag_name == "TouchableWithoutFeedback";
+
+        let mut is_group_pressable = false;
+        if is_pressable {
+            for attr in &el.opening.attrs {
+                if let JSXAttrOrSpread::JSXAttr(jsx_attr) = attr {
+                    if let JSXAttrName::Ident(ident) = &jsx_attr.name {
+                        if ident.sym.as_str() == "className" {
+                            if let Some(JSXAttrValue::Str(s)) = &jsx_attr.value {
+                                if s.value.as_str().map(|v| v.split_whitespace().any(|c| c == "group" || c.starts_with("group/"))).unwrap_or(false) {
+                                    is_group_pressable = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if is_group_pressable {
+            let prev_group_active = self.group_active_used;
+            self.group_active_used = false;
+            self.group_depth += 1;
+
+            el.opening.visit_mut_with(self);
+            el.children.visit_mut_with(self);
+
+            let children_used_group_active = self.group_active_used;
+            self.group_depth -= 1;
+            self.group_active_used = prev_group_active || children_used_group_active;
+
+            if children_used_group_active && !el.children.is_empty() {
+                let already_function = el.children.len() == 1 && match &el.children[0] {
+                    JSXElementChild::JSXExprContainer(c) => match &c.expr {
+                        JSXExpr::Expr(e) => matches!(**e, Expr::Arrow(_) | Expr::Fn(_)),
+                        _ => false,
+                    },
+                    _ => false,
+                };
+
+                if !already_function {
+                    let pressed_ident = Ident::new_no_ctxt("pressed".into(), DUMMY_SP);
+                    let pressed_param = Pat::Object(ObjectPat {
+                        span: DUMMY_SP,
+                        props: vec![ObjectPatProp::Assign(AssignPatProp {
+                            span: DUMMY_SP,
+                            key: BindingIdent::from(pressed_ident),
+                            value: None,
+                        })],
+                        optional: false,
+                        type_ann: None,
+                    });
+
+                    let old_children = std::mem::take(&mut el.children);
+                    let frag = JSXFragment {
+                        span: DUMMY_SP,
+                        opening: JSXOpeningFragment { span: DUMMY_SP },
+                        children: old_children,
+                        closing: JSXClosingFragment { span: DUMMY_SP },
+                    };
+                    let body_expr = Expr::JSXFragment(frag);
+
+                    let arrow_fn = Expr::Arrow(ArrowExpr {
+                        span: DUMMY_SP,
+                        params: vec![pressed_param],
+                        body: Box::new(ArrowFunctionBody::Expr(Box::new(body_expr))),
+                        is_async: false,
+                        is_generator: false,
+                        type_params: None,
+                        return_type: None,
+                        ctxt: Default::default(),
+                    });
+
+                    el.children = vec![JSXElementChild::JSXExprContainer(JSXExprContainer {
+                        span: DUMMY_SP,
+                        expr: JSXExpr::Expr(Box::new(arrow_fn)),
+                    })];
+                }
+            }
+        } else {
+            el.opening.visit_mut_with(self);
+            el.children.visit_mut_with(self);
+        }
+    }
+
     fn visit_mut_jsx_opening_element(&mut self, opening: &mut JSXOpeningElement) {
         let tag_name = match &opening.name {
             JSXElementName::Ident(ident) => ident.sym.as_str().to_string(),
@@ -1946,6 +2058,8 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
         stylesheet: &stylesheet_index,
         collector: &mut collector,
         has_animated_transition: false,
+        group_depth: 0,
+        group_active_used: false,
     };
     module.visit_mut_with(&mut visitor);
 
@@ -2477,5 +2591,47 @@ mod tests {
         assert!(res.code.contains("paddingHorizontal: 12"));
         assert!(res.code.contains("translateX: 10"));
         assert!(res.code.contains("rotate: \"45deg\""));
+    }
+
+    #[test]
+    fn test_transform_nested_ternaries_in_template_literal() {
+        let code = r##"
+            import { View } from "react-native";
+            export function ThemedCard({ variant }) {
+                return (
+                    <View
+                        className={`p-4 rounded-xl border ${
+                            variant === "primary"
+                                ? "border-blue-500 bg-blue-500"
+                                : variant === "secondary"
+                                ? "border-green-500 bg-green-500"
+                                : "border-orange-500 bg-orange-500"
+                        }`}
+                    />
+                );
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "p-4": { "_static": { "padding": 16 } },
+            "rounded-xl": { "_static": { "borderRadius": 12 } },
+            "border": { "_static": { "borderWidth": 1 } },
+            "border-blue-500": { "_static": { "borderColor": "#3b82f6" } },
+            "bg-blue-500": { "_static": { "backgroundColor": "#3b82f6" } },
+            "border-green-500": { "_static": { "borderColor": "#22c55e" } },
+            "bg-green-500": { "_static": { "backgroundColor": "#22c55e" } },
+            "border-orange-500": { "_static": { "borderColor": "#f97316" } },
+            "bg-orange-500": { "_static": { "backgroundColor": "#f97316" } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("ThemedCard.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            source_maps: Some(false),
+        })).unwrap();
+
+        assert!(res.code.contains("variant === \"primary\""));
+        assert!(res.code.contains("variant === \"secondary\""));
+        assert!(res.code.contains("_rnStyles."));
     }
 }
