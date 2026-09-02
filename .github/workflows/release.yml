@@ -93,6 +93,7 @@ jobs:
     name: Publish to npm and GitHub Release
     needs: build-artifacts
     runs-on: ubuntu-latest
+    environment: production
     permissions:
       contents: write
       id-token: write
