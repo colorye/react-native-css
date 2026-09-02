@@ -105,6 +105,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org
 
       - name: Download all native binaries
         uses: actions/download-artifact@v4
@@ -128,12 +129,9 @@ jobs:
         run: yarn build:js
 
       - name: Publish to npm
-        run: |
-          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
-            npm publish --provenance --access public --//registry.npmjs.org/:_authToken="${{ secrets.NPM_TOKEN }}"
-          else
-            npm publish --provenance --access public
-          fi
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         env:
