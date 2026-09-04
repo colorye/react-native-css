@@ -1,8 +1,15 @@
 {
   "name": "@colorye/react-native-css",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "Rye Nguyen <ryenguyen7411@gmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/colorye/react-native-css.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "packageManager": "yarn@4.18.0+sha512.fcb8716fe7cd0eece141ffc18b92193a9df9204c1ba83189c288835223fc0bbe64af473bab0d5e9927a7daeb5caf2bb07eb2787cc9338ca040ea125f2a1f2f7e",
