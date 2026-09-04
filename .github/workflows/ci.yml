@@ -12,17 +12,20 @@ concurrency:
 jobs:
   test-rust:
     name: Rust Unit Tests
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Rust Test (SWC Transformer & CSS Engine)
         run: cargo test --manifest-path crates/transformer/Cargo.toml
 
   test-js:
     name: JS Build & Type Validation
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,10 +34,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: yarn
 
-      - name: Install Dependencies
-        run: yarn install --immutable || yarn install
+      - name: Enable Corepack & Install Dependencies
+        run: |
+          corepack enable
+          yarn install --immutable || yarn install
 
       - name: Build JavaScript & Sync Types
         run: yarn build:js
