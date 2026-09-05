@@ -4,14 +4,14 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 exports["default"] = void 0;
+function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n = 0, F = function F() {}; return { s: F, n: function n() { return _n >= r.length ? { done: !0 } : { done: !1, value: r[_n++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
+function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
 function _slicedToArray(r, e) { return _arrayWithHoles(r) || _iterableToArrayLimit(r, e) || _unsupportedIterableToArray(r, e) || _nonIterableRest(); }
 function _nonIterableRest() { throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); }
-function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
-function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
-function _createForOfIteratorHelper(r, e) { var t = "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (!t) { if (Array.isArray(r) || (t = _unsupportedIterableToArray(r)) || e && r && "number" == typeof r.length) { t && (r = t); var _n = 0, F = function F() {}; return { s: F, n: function n() { return _n >= r.length ? { done: !0 } : { done: !1, value: r[_n++] }; }, e: function e(r) { throw r; }, f: F }; } throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method."); } var o, a = !0, u = !1; return { s: function s() { t = t.call(r); }, n: function n() { var r = t.next(); return a = r.done, r; }, e: function e(r) { u = !0, o = r; }, f: function f() { try { a || null == t["return"] || t["return"](); } finally { if (u) throw o; } } }; }
 function _unsupportedIterableToArray(r, a) { if (r) { if ("string" == typeof r) return _arrayLikeToArray(r, a); var t = {}.toString.call(r).slice(8, -1); return "Object" === t && r.constructor && (t = r.constructor.name), "Map" === t || "Set" === t ? Array.from(r) : "Arguments" === t || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(t) ? _arrayLikeToArray(r, a) : void 0; } }
 function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length); for (var e = 0, n = Array(a); e < a; e++) n[e] = r[e]; return n; }
-function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
+function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
+function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
 var RN = {};
 try {
   RN = require("react-native");
@@ -30,6 +30,9 @@ var Dimensions = RN.Dimensions || {
       height: 812
     };
   }
+};
+var Platform = RN.Platform || {
+  OS: "ios"
 };
 
 // ============================================================================
@@ -77,7 +80,8 @@ function getCacheKey() {
     width = _getDimensions.width,
     height = _getDimensions.height;
   var colorScheme = getColorScheme();
-  return "".concat(width, "x").concat(height, ":").concat(colorScheme);
+  var os = (Platform === null || Platform === void 0 ? void 0 : Platform.OS) || "ios";
+  return "".concat(width, "x").concat(height, ":").concat(colorScheme, ":").concat(os);
 }
 function invalidateCache() {
   cachedDimensions = null;
@@ -133,6 +137,109 @@ function getFlattenStyle(declarations) {
   }
   return Object.keys(result).length > 0 ? result : undefined;
 }
+function resolveCssVars(val, rootVars, localVars) {
+  if (typeof val !== "string" || !val.includes("var(")) return val;
+  var res = val;
+  var iterations = 0;
+  while (res.includes("var(") && iterations < 5) {
+    iterations++;
+    res = res.replace(/var\(\s*(--[a-zA-Z0-9_-]+)(?:\s*,\s*([^)]+))?\s*\)/g, function (_, name, fb) {
+      if (localVars && localVars[name] !== undefined) return localVars[name];
+      return rootVars[name] !== undefined ? rootVars[name] : fb || "";
+    });
+  }
+  return res;
+}
+function resolveCssValue(prop, val, rootVars, localVars) {
+  if (typeof val !== "string") return val;
+  var v = resolveCssVars(val, rootVars, localVars).trim();
+  if (prop === "boxShadow") {
+    var parts = v.split(/,(?![^(]*\))/).map(function (p) {
+      return p.trim();
+    }).filter(function (p) {
+      return p && !p.includes("0 0 #0000") && !p.includes("0 0 #000") && !p.includes("0 0 0 0");
+    });
+    if (parts.length === 0) return undefined;
+    v = parts.join(", ");
+  }
+  if (v.startsWith("calc(") && v.endsWith(")")) {
+    var inner = v.slice(5, -1).trim();
+    inner = inner.replace(/([\d.]+)rem/g, function (_, n) {
+      return parseFloat(n) * 16 + "px";
+    });
+    inner = inner.replace(/px/g, "");
+    try {
+      v = Function('"use strict"; return (' + inner + ')')();
+    } catch (_unused5) {}
+  }
+  if (typeof v === "string" && v.endsWith("rem")) {
+    v = parseFloat(v) * 16;
+  } else if (typeof v === "string" && v.endsWith("px")) {
+    v = parseFloat(v);
+  } else if (typeof v === "string" && (v.endsWith("vh") || v.endsWith("vw"))) {
+    v = parseFloat(v) + "%";
+  }
+  if (prop.toLowerCase().endsWith("radius") && (v === "50%" || v === "9999px" || v === 9999)) {
+    return 9999;
+  }
+  if (prop === "fontWeight") {
+    return String(v).replace("px", "").replace("rem", "");
+  }
+  if (typeof v === "string" && !isNaN(Number(v)) && !["color", "fontFamily", "fontWeight"].includes(prop) && !prop.endsWith("Color")) {
+    v = Number(v);
+  }
+  return v;
+}
+function applyResolvedEntry(resolved, entry, rootVars) {
+  if (!entry) return;
+  var localVars = {};
+  if (entry._static) {
+    for (var _i2 = 0, _Object$entries = Object.entries(entry._static); _i2 < _Object$entries.length; _i2++) {
+      var _Object$entries$_i = _slicedToArray(_Object$entries[_i2], 2),
+        k = _Object$entries$_i[0],
+        v = _Object$entries$_i[1];
+      if (k.startsWith("--") && typeof v === "string") {
+        localVars[k] = v;
+      }
+    }
+  }
+  if (entry._static) {
+    for (var _i3 = 0, _Object$entries2 = Object.entries(entry._static); _i3 < _Object$entries2.length; _i3++) {
+      var _Object$entries2$_i = _slicedToArray(_Object$entries2[_i3], 2),
+        _k = _Object$entries2$_i[0],
+        _v = _Object$entries2$_i[1];
+      if (_k.startsWith("--")) continue;
+      var val = resolveCssValue(_k, _v, rootVars, localVars);
+      if (val !== undefined && val !== null) {
+        resolved[_k] = val;
+      }
+    }
+  }
+  if (entry._dynamic) {
+    for (var _i4 = 0, _Object$entries3 = Object.entries(entry._dynamic); _i4 < _Object$entries3.length; _i4++) {
+      var _Object$entries3$_i = _slicedToArray(_Object$entries3[_i4], 2),
+        _k2 = _Object$entries3$_i[0],
+        _v2 = _Object$entries3$_i[1];
+      if (_k2.startsWith("--")) continue;
+      var _val = resolveCssValue(_k2, _v2, rootVars, localVars);
+      if (_val !== undefined && _val !== null) {
+        resolved[_k2] = _val;
+      }
+    }
+  }
+  if (!entry._static && !entry._dynamic) {
+    for (var _i5 = 0, _Object$entries4 = Object.entries(entry); _i5 < _Object$entries4.length; _i5++) {
+      var _Object$entries4$_i = _slicedToArray(_Object$entries4[_i5], 2),
+        _k3 = _Object$entries4$_i[0],
+        _v3 = _Object$entries4$_i[1];
+      if (_k3.startsWith("--")) continue;
+      var _val2 = resolveCssValue(_k3, _v3, rootVars, localVars);
+      if (_val2 !== undefined && _val2 !== null) {
+        resolved[_k3] = _val2;
+      }
+    }
+  }
+}
 
 // ============================================================================
 // Main Native Rust Stylesheet Transform
@@ -142,6 +249,7 @@ function transformStyles(stylesheet, classNames) {
   if (stylesheet["default"] && _typeof(stylesheet["default"]) === "object" && !stylesheet[":root"]) {
     stylesheet = stylesheet["default"];
   }
+  var rootVars = stylesheet[":root"] || {};
   var _getDimensions2 = getDimensions(),
     width = _getDimensions2.width,
     height = _getDimensions2.height;
@@ -156,21 +264,55 @@ function transformStyles(stylesheet, classNames) {
   }
   var classes = classNames.trim().split(/\s+/);
   var resolved = {};
+  var os = (Platform === null || Platform === void 0 ? void 0 : Platform.OS) || "ios";
   var _iterator = _createForOfIteratorHelper(classes),
     _step;
   try {
     for (_iterator.s(); !(_step = _iterator.n()).done;) {
       var cls = _step.value;
       if (!cls) continue;
+
+      // Platform variants: ios:, android:, web:
+      if (cls.startsWith("ios:")) {
+        if (os !== "ios") continue;
+        cls = cls.slice(4);
+      } else if (cls.startsWith("android:")) {
+        if (os !== "android") continue;
+        cls = cls.slice(8);
+      } else if (cls.startsWith("web:")) {
+        if (os !== "web") continue;
+        cls = cls.slice(4);
+      }
+
+      // Media query variants: sm:, md:, lg:, xl:, 2xl:
+      if (cls.startsWith("sm:")) {
+        if (width < 640) continue;
+        cls = cls.slice(3);
+      } else if (cls.startsWith("md:")) {
+        if (width < 768) continue;
+        cls = cls.slice(3);
+      } else if (cls.startsWith("lg:")) {
+        if (width < 1024) continue;
+        cls = cls.slice(3);
+      } else if (cls.startsWith("xl:")) {
+        if (width < 1280) continue;
+        cls = cls.slice(3);
+      } else if (cls.startsWith("2xl:")) {
+        if (width < 1536) continue;
+        cls = cls.slice(4);
+      }
+
+      // Dark / Light variants
+      if (cls.startsWith("dark:")) {
+        if (colorScheme !== "dark") continue;
+        cls = cls.slice(5);
+      } else if (cls.startsWith("light:")) {
+        if (colorScheme !== "light") continue;
+        cls = cls.slice(6);
+      }
       var entry = stylesheet[cls];
       if (!entry) continue;
-      if (entry._static) {
-        Object.assign(resolved, entry._static);
-      } else if (entry._dynamic) {
-        Object.assign(resolved, entry._dynamic);
-      } else if (_typeof(entry) === "object") {
-        Object.assign(resolved, entry);
-      }
+      applyResolvedEntry(resolved, entry, rootVars);
     }
   } catch (err) {
     _iterator.e(err);

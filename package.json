@@ -48,10 +48,12 @@
       "default": "./dist/index.js"
     },
     "./types": "./types.d.ts",
+    "./metro": "./dist/metro.js",
     "./transformer": "./dist/transformer.js",
     "./native": "./crates/transformer/index.js",
     "./babel": "./dist/babel.js",
     "./exported-stylesheet.json": "./dist/exported-stylesheet.json",
+    "./dist/*": "./dist/*",
     "./dist/transformer-runtime": "./dist/transformer-runtime.js",
     "./dist/transformer-runtime.js": "./dist/transformer-runtime.js"
   }

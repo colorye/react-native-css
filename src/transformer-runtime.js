@@ -7,6 +7,7 @@ try {
 
 const Appearance = RN.Appearance || { getColorScheme: () => "light" };
 const Dimensions = RN.Dimensions || { get: () => ({ width: 375, height: 812 }) };
+const Platform = RN.Platform || { OS: "ios" };
 
 // ============================================================================
 // Constants
@@ -57,7 +58,8 @@ function getColorScheme() {
 function getCacheKey() {
   const { width, height } = getDimensions();
   const colorScheme = getColorScheme();
-  return `${width}x${height}:${colorScheme}`;
+  const os = Platform?.OS || "ios";
+  return `${width}x${height}:${colorScheme}:${os}`;
 }
 
 function invalidateCache() {
@@ -120,6 +122,110 @@ function getFlattenStyle(declarations) {
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
+function resolveCssVars(val, rootVars, localVars) {
+  if (typeof val !== "string" || !val.includes("var(")) return val;
+  let res = val;
+  let iterations = 0;
+  while (res.includes("var(") && iterations < 5) {
+    iterations++;
+    res = res.replace(/var\(\s*(--[a-zA-Z0-9_-]+)(?:\s*,\s*([^)]+))?\s*\)/g, (_, name, fb) => {
+      if (localVars && localVars[name] !== undefined) return localVars[name];
+      return rootVars[name] !== undefined ? rootVars[name] : (fb || "");
+    });
+  }
+  return res;
+}
+
+function resolveCssValue(prop, val, rootVars, localVars) {
+  if (typeof val !== "string") return val;
+  let v = resolveCssVars(val, rootVars, localVars).trim();
+
+  if (prop === "boxShadow") {
+    const parts = v
+      .split(/,(?![^(]*\))/)
+      .map((p) => p.trim())
+      .filter((p) => p && !p.includes("0 0 #0000") && !p.includes("0 0 #000") && !p.includes("0 0 0 0"));
+    if (parts.length === 0) return undefined;
+    v = parts.join(", ");
+  }
+
+  if (v.startsWith("calc(") && v.endsWith(")")) {
+    let inner = v.slice(5, -1).trim();
+    inner = inner.replace(/([\d.]+)rem/g, (_, n) => parseFloat(n) * 16 + "px");
+    inner = inner.replace(/px/g, "");
+    try {
+      v = Function('"use strict"; return (' + inner + ')')();
+    } catch {}
+  }
+
+  if (typeof v === "string" && v.endsWith("rem")) {
+    v = parseFloat(v) * 16;
+  } else if (typeof v === "string" && v.endsWith("px")) {
+    v = parseFloat(v);
+  } else if (typeof v === "string" && (v.endsWith("vh") || v.endsWith("vw"))) {
+    v = parseFloat(v) + "%";
+  }
+
+  if (prop.toLowerCase().endsWith("radius") && (v === "50%" || v === "9999px" || v === 9999)) {
+    return 9999;
+  }
+  if (prop === "fontWeight") {
+    return String(v).replace("px", "").replace("rem", "");
+  }
+  if (
+    typeof v === "string" &&
+    !isNaN(Number(v)) &&
+    !["color", "fontFamily", "fontWeight"].includes(prop) &&
+    !prop.endsWith("Color")
+  ) {
+    v = Number(v);
+  }
+  return v;
+}
+
+function applyResolvedEntry(resolved, entry, rootVars) {
+  if (!entry) return;
+
+  const localVars = {};
+  if (entry._static) {
+    for (const [k, v] of Object.entries(entry._static)) {
+      if (k.startsWith("--") && typeof v === "string") {
+        localVars[k] = v;
+      }
+    }
+  }
+
+  if (entry._static) {
+    for (const [k, v] of Object.entries(entry._static)) {
+      if (k.startsWith("--")) continue;
+      const val = resolveCssValue(k, v, rootVars, localVars);
+      if (val !== undefined && val !== null) {
+        resolved[k] = val;
+      }
+    }
+  }
+
+  if (entry._dynamic) {
+    for (const [k, v] of Object.entries(entry._dynamic)) {
+      if (k.startsWith("--")) continue;
+      const val = resolveCssValue(k, v, rootVars, localVars);
+      if (val !== undefined && val !== null) {
+        resolved[k] = val;
+      }
+    }
+  }
+
+  if (!entry._static && !entry._dynamic) {
+    for (const [k, v] of Object.entries(entry)) {
+      if (k.startsWith("--")) continue;
+      const val = resolveCssValue(k, v, rootVars, localVars);
+      if (val !== undefined && val !== null) {
+        resolved[k] = val;
+      }
+    }
+  }
+}
+
 // ============================================================================
 // Main Native Rust Stylesheet Transform
 // ============================================================================
@@ -129,6 +235,7 @@ function transformStyles(stylesheet, classNames) {
     stylesheet = stylesheet.default;
   }
 
+  const rootVars = stylesheet[":root"] || {};
   const { width, height } = getDimensions();
   const colorScheme = getColorScheme();
 
@@ -145,18 +252,54 @@ function transformStyles(stylesheet, classNames) {
   const classes = classNames.trim().split(/\s+/);
   const resolved = {};
 
-  for (const cls of classes) {
+  const os = Platform?.OS || "ios";
+
+  for (let cls of classes) {
     if (!cls) continue;
+
+    // Platform variants: ios:, android:, web:
+    if (cls.startsWith("ios:")) {
+      if (os !== "ios") continue;
+      cls = cls.slice(4);
+    } else if (cls.startsWith("android:")) {
+      if (os !== "android") continue;
+      cls = cls.slice(8);
+    } else if (cls.startsWith("web:")) {
+      if (os !== "web") continue;
+      cls = cls.slice(4);
+    }
+
+    // Media query variants: sm:, md:, lg:, xl:, 2xl:
+    if (cls.startsWith("sm:")) {
+      if (width < 640) continue;
+      cls = cls.slice(3);
+    } else if (cls.startsWith("md:")) {
+      if (width < 768) continue;
+      cls = cls.slice(3);
+    } else if (cls.startsWith("lg:")) {
+      if (width < 1024) continue;
+      cls = cls.slice(3);
+    } else if (cls.startsWith("xl:")) {
+      if (width < 1280) continue;
+      cls = cls.slice(3);
+    } else if (cls.startsWith("2xl:")) {
+      if (width < 1536) continue;
+      cls = cls.slice(4);
+    }
+
+    // Dark / Light variants
+    if (cls.startsWith("dark:")) {
+      if (colorScheme !== "dark") continue;
+      cls = cls.slice(5);
+    } else if (cls.startsWith("light:")) {
+      if (colorScheme !== "light") continue;
+      cls = cls.slice(6);
+    }
+
     const entry = stylesheet[cls];
     if (!entry) continue;
 
-    if (entry._static) {
-      Object.assign(resolved, entry._static);
-    } else if (entry._dynamic) {
-      Object.assign(resolved, entry._dynamic);
-    } else if (typeof entry === "object") {
-      Object.assign(resolved, entry);
-    }
+    applyResolvedEntry(resolved, entry, rootVars);
   }
 
   const result = Object.keys(resolved).length > 0 ? resolved : undefined;

@@ -6,6 +6,7 @@ export {
   remapProps,
   setGlobalStylesheet,
 } from "./interop.js";
+export { withReactNativeCss } from "./metro.js";
 export { default as Runtime } from "./transformer-runtime.js";
 
 import {
@@ -16,6 +17,7 @@ import {
   remapProps,
   setGlobalStylesheet,
 } from "./interop.js";
+import { withReactNativeCss } from "./metro.js";
 import Runtime from "./transformer-runtime.js";
 
 export default {
@@ -26,4 +28,5 @@ export default {
   GroupContext,
   InheritContext,
   Runtime,
+  withReactNativeCss,
 };

@@ -35,6 +35,7 @@ pub struct RuntimeMatchOptions {
     pub width: Option<f64>,
     pub height: Option<f64>,
     pub color_scheme: Option<String>,
+    pub platform: Option<String>,
 }
 
 /// Helper struct that holds parsed stylesheet declarations & resolves Tailwind CSS v4 variables
@@ -66,16 +67,17 @@ impl StylesheetIndex {
 
     /// Resolve a single class name on demand
     pub fn get_class_style(&self, class_name: &str) -> Option<HashMap<String, JsonValue>> {
-        let class_val = self.raw_json.get(class_name)
-            .or_else(|| self.raw_json.get(&format!("active:{}", class_name)))
-            .or_else(|| self.raw_json.get(&format!("disabled:{}", class_name)))
-            .or_else(|| self.raw_json.get(&format!("group-active:{}", class_name)))
+        let trimmed_class = class_name.trim();
+        let class_val = self.raw_json.get(trimmed_class)
+            .or_else(|| self.raw_json.get(&format!("active:{}", trimmed_class)))
+            .or_else(|| self.raw_json.get(&format!("disabled:{}", trimmed_class)))
+            .or_else(|| self.raw_json.get(&format!("group-active:{}", trimmed_class)))
             .or_else(|| {
-                class_name.strip_prefix("active:")
-                    .or_else(|| class_name.strip_prefix("pressed:"))
-                    .or_else(|| class_name.strip_prefix("disabled:"))
-                    .or_else(|| class_name.strip_prefix("group-active:"))
-                    .or_else(|| class_name.strip_prefix("group-pressed:"))
+                trimmed_class.strip_prefix("active:")
+                    .or_else(|| trimmed_class.strip_prefix("pressed:"))
+                    .or_else(|| trimmed_class.strip_prefix("disabled:"))
+                    .or_else(|| trimmed_class.strip_prefix("group-active:"))
+                    .or_else(|| trimmed_class.strip_prefix("group-pressed:"))
                     .and_then(|rest| {
                         self.raw_json.get(rest)
                             .or_else(|| self.raw_json.get(&format!("disabled:{}", rest)))
@@ -114,7 +116,10 @@ impl StylesheetIndex {
                     }
                 }
             }
-        } else if let Some(direct_obj) = class_val.as_object() {
+        }
+
+        // 3. Collect direct properties (when class_val is already plain map, not wrapped in _static/_dynamic)
+        if let Some(direct_obj) = class_val.as_object() {
             for (k, v) in direct_obj {
                 if !k.starts_with("--") && k != "_dynamic" && k != "_static" {
                     if let Some(str_val) = v.as_str() {
@@ -306,6 +311,14 @@ impl StylesheetIndex {
         if trimmed.ends_with("px") {
             if let Ok(num) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
                 return serde_json::json!(num);
+            }
+        }
+
+        // 3.5. Handle vh/vw units (100vh -> "100%", 100vw -> "100%")
+        if trimmed.ends_with("vh") || trimmed.ends_with("vw") {
+            let num_part = trimmed[..trimmed.len() - 2].trim();
+            if let Ok(n) = num_part.parse::<f64>() {
+                return serde_json::json!(format!("{}%", n));
             }
         }
 
@@ -1145,6 +1158,10 @@ impl StylesheetIndex {
     }
 
     pub fn insert_resolved_property(prop_map: &mut HashMap<String, JsonValue>, key: &str, val: JsonValue) {
+        if val.is_null() {
+            return;
+        }
+
         if key == "scale" {
             prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": val }]));
             return;
@@ -1504,14 +1521,7 @@ impl<'a> CssTransformerVisitor<'a> {
                 let cons_expr = self.transform_dynamic_branch(&cond.cons, disabled_prop_expr);
                 let alt_expr = self.transform_dynamic_branch(&cond.alt, disabled_prop_expr);
 
-                if cons_expr.is_some() || alt_expr.is_some() {
-                    let cons_ast = cons_expr.unwrap_or_else(|| {
-                        Expr::Lit(Lit::Null(swc_core::ecma::ast::Null { span: DUMMY_SP }))
-                    });
-                    let alt_ast = alt_expr.unwrap_or_else(|| {
-                        Expr::Lit(Lit::Null(swc_core::ecma::ast::Null { span: DUMMY_SP }))
-                    });
-
+                if let (Some(cons_ast), Some(alt_ast)) = (cons_expr, alt_expr) {
                     Some(Expr::Cond(CondExpr {
                         span: DUMMY_SP,
                         test: cond.test.clone(),
@@ -1534,8 +1544,8 @@ impl<'a> CssTransformerVisitor<'a> {
                 }))
             }
 
-            // Pass-through identifiers (e.g. dynamic class variable)
-            Expr::Ident(ident) => Some(Expr::Ident(ident.clone())),
+            // Only pass through `undefined` literal identifier, not arbitrary identifiers (which hold class strings!)
+            Expr::Ident(ident) if ident.sym.as_str() == "undefined" => Some(Expr::Ident(ident.clone())),
 
             _ => None,
         }
@@ -2241,8 +2251,35 @@ pub fn resolve_runtime_styles(
     let width = options.as_ref().and_then(|o| o.width).unwrap_or(375.0);
     let _height = options.as_ref().and_then(|o| o.height).unwrap_or(812.0);
     let color_scheme = options.as_ref().and_then(|o| o.color_scheme.as_deref()).unwrap_or("light");
+    let current_platform = options.as_ref().and_then(|o| o.platform.as_deref()).unwrap_or("ios");
 
     for cls in classes {
+        // Platform variants: ios:, android:, web:
+        if cls.starts_with("ios:") {
+            if current_platform == "ios" {
+                if let Some(props) = index.get_class_style(&cls[4..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+        if cls.starts_with("android:") {
+            if current_platform == "android" {
+                if let Some(props) = index.get_class_style(&cls[8..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+        if cls.starts_with("web:") {
+            if current_platform == "web" {
+                if let Some(props) = index.get_class_style(&cls[4..]) {
+                    for (k, v) in props { merged.insert(k, v); }
+                }
+            }
+            continue;
+        }
+
         // Handle media query / dark mode prefix
         if cls.starts_with("dark:") {
             if color_scheme == "dark" {
@@ -2396,11 +2433,42 @@ mod tests {
                 width: Some(800.0),
                 height: Some(600.0),
                 color_scheme: Some("dark".to_string()),
+                platform: Some("ios".to_string()),
             }),
         ).unwrap();
 
         assert!(dark_res.contains("fontSize\":18"));
         assert!(dark_res.contains("backgroundColor\":\"#000000\""));
+
+        // Platform-specific matching test
+        let platform_sheet = r##"{
+            "p-4": { "_static": { "padding": 16.0 } },
+            "p-6": { "_static": { "padding": 24.0 } }
+        }"##.to_string();
+
+        let ios_res = resolve_runtime_styles(
+            platform_sheet.clone(),
+            "ios:p-4 android:p-6".to_string(),
+            Some(RuntimeMatchOptions {
+                width: Some(375.0),
+                height: Some(812.0),
+                color_scheme: Some("light".to_string()),
+                platform: Some("ios".to_string()),
+            }),
+        ).unwrap();
+        assert!(ios_res.contains("16.0"));
+
+        let android_res = resolve_runtime_styles(
+            platform_sheet,
+            "ios:p-4 android:p-6".to_string(),
+            Some(RuntimeMatchOptions {
+                width: Some(375.0),
+                height: Some(812.0),
+                color_scheme: Some("light".to_string()),
+                platform: Some("android".to_string()),
+            }),
+        ).unwrap();
+        assert!(android_res.contains("24.0"));
     }
 
     #[test]

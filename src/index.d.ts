@@ -73,6 +73,11 @@ export function getStylesheet(css: string, filename?: string): string;
 export function writeStylesheetJSON(content: string, filename?: string): void;
 export function transform(args: { src: string; filename: string; options?: any }): any;
 
+/**
+ * Plug-and-play zero-configuration helper for Expo and React Native Metro bundler.
+ */
+export function withReactNativeCss<T = any>(metroConfig: T, options?: { input?: string }): T;
+
 declare const _default: {
   cssInterop: typeof cssInterop;
   remapProps: typeof remapProps;
@@ -84,6 +89,7 @@ declare const _default: {
   getStylesheet: typeof getStylesheet;
   transform: typeof transform;
   writeStylesheetJSON: typeof writeStylesheetJSON;
+  withReactNativeCss: typeof withReactNativeCss;
 };
 
 export default _default;
