@@ -34,6 +34,15 @@ function loadStylesheet(cssPath) {
       return stylesheet;
     }
 
+    // Try project root index.css.json
+    const projectRootJson = nodePath.resolve(process.cwd(), "index.css.json");
+    if (fs.existsSync(projectRootJson)) {
+      const content = fs.readFileSync(projectRootJson, "utf-8");
+      const stylesheet = JSON.parse(content);
+      stylesheetCache.set(cssPath, stylesheet);
+      return stylesheet;
+    }
+
     // Try .json next to the CSS file
     const cssJsonPath = `${cssPath}.json`;
     if (fs.existsSync(cssJsonPath)) {
@@ -104,7 +113,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime"),
                   ]),
                   t.identifier("default"),
                 ),
@@ -120,7 +129,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime"),
                   ]),
                   t.identifier("default"),
                 ),
@@ -136,7 +145,7 @@ export default function ({ types: t }) {
               t.memberExpression(
                 t.memberExpression(
                   t.callExpression(t.identifier("require"), [
-                    t.stringLiteral(nodePath.join(libRoot, "./transformer-runtime")),
+                    t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime"),
                   ]),
                   t.identifier("default"),
                 ),
@@ -200,9 +209,16 @@ export default function ({ types: t }) {
           }
         }
 
-        const shouldCombineStyles = openingElement.attributes.some(
+        const hasClassName = openingElement.attributes.some(
+          (attr) => attr.name?.name === "className",
+        );
+        const hasCombinedStyles = openingElement.attributes.some(
           (attr) => attr.name?.name === "__combinedStyles",
         );
+        const hasInheritStyle = openingElement.attributes.some(
+          (attr) => attr.name?.name === "inheritStyle",
+        );
+        const shouldCombineStyles = hasClassName || hasCombinedStyles || hasInheritStyle;
 
         if (shouldCombineStyles) {
           let styleExpressions;

@@ -17,3 +17,4 @@ node_modules/
 .DS_Store
 
 dist/exported-stylesheet.json
+src/exported-stylesheet.json

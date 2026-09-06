@@ -30,13 +30,22 @@ function loadStylesheet(cssPath) {
       return stylesheet;
     }
 
-    // Try .json next to the CSS file
-    var cssJsonPath = "".concat(cssPath, ".json");
-    if (_fs["default"].existsSync(cssJsonPath)) {
-      var _content = _fs["default"].readFileSync(cssJsonPath, "utf-8");
+    // Try project root index.css.json
+    var projectRootJson = _path["default"].resolve(process.cwd(), "index.css.json");
+    if (_fs["default"].existsSync(projectRootJson)) {
+      var _content = _fs["default"].readFileSync(projectRootJson, "utf-8");
       var _stylesheet = JSON.parse(_content);
       stylesheetCache.set(cssPath, _stylesheet);
       return _stylesheet;
+    }
+
+    // Try .json next to the CSS file
+    var cssJsonPath = "".concat(cssPath, ".json");
+    if (_fs["default"].existsSync(cssJsonPath)) {
+      var _content2 = _fs["default"].readFileSync(cssJsonPath, "utf-8");
+      var _stylesheet2 = JSON.parse(_content2);
+      stylesheetCache.set(cssPath, _stylesheet2);
+      return _stylesheet2;
     }
     return null;
   } catch (_unused) {
@@ -90,11 +99,11 @@ function _default(_ref) {
           state.stylesheetId = path.scope.generateUidIdentifier();
           state.stylesheet = t.variableDeclaration("var", [t.variableDeclarator(state.stylesheetId, t.callExpression(t.identifier("require"), [t.stringLiteral(options.css)]))]);
           state.getStyleId = path.scope.generateUidIdentifier();
-          state.getStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getStyle")))]);
+          state.getStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime")]), t.identifier("default")), t.identifier("getStyle")))]);
           state.getInheritStyleId = path.scope.generateUidIdentifier();
-          state.getInheritStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getInheritStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("getInheritStyle")))]);
+          state.getInheritStyle = t.variableDeclaration("var", [t.variableDeclarator(state.getInheritStyleId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime")]), t.identifier("default")), t.identifier("getInheritStyle")))]);
           state.mergeStylesId = path.scope.generateUidIdentifier();
-          state.mergeStyles = t.variableDeclaration("var", [t.variableDeclarator(state.mergeStylesId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral(_path["default"].join(libRoot, "./transformer-runtime"))]), t.identifier("default")), t.identifier("mergeStyles")))]);
+          state.mergeStyles = t.variableDeclaration("var", [t.variableDeclarator(state.mergeStylesId, t.memberExpression(t.memberExpression(t.callExpression(t.identifier("require"), [t.stringLiteral("@colorye/react-native-css/dist/transformer-runtime")]), t.identifier("default")), t.identifier("mergeStyles")))]);
         },
         exit: function exit(path, state) {
           if (!state.enabled) return;
@@ -137,10 +146,19 @@ function _default(_ref) {
             openingElement.attributes.push(t.jsxAttribute(t.jsxIdentifier("inheritStyle"), t.jsxExpressionContainer(inheritStyleExpressions)));
           }
         }
-        var shouldCombineStyles = openingElement.attributes.some(function (attr) {
+        var hasClassName = openingElement.attributes.some(function (attr) {
           var _attr$name2;
-          return ((_attr$name2 = attr.name) === null || _attr$name2 === void 0 ? void 0 : _attr$name2.name) === "__combinedStyles";
+          return ((_attr$name2 = attr.name) === null || _attr$name2 === void 0 ? void 0 : _attr$name2.name) === "className";
         });
+        var hasCombinedStyles = openingElement.attributes.some(function (attr) {
+          var _attr$name3;
+          return ((_attr$name3 = attr.name) === null || _attr$name3 === void 0 ? void 0 : _attr$name3.name) === "__combinedStyles";
+        });
+        var hasInheritStyle = openingElement.attributes.some(function (attr) {
+          var _attr$name4;
+          return ((_attr$name4 = attr.name) === null || _attr$name4 === void 0 ? void 0 : _attr$name4.name) === "inheritStyle";
+        });
+        var shouldCombineStyles = hasClassName || hasCombinedStyles || hasInheritStyle;
         if (shouldCombineStyles) {
           var styleExpressions;
 
@@ -159,8 +177,8 @@ function _default(_ref) {
             styleExpressions = (0, _babel.getStyleExpression)(path, state, t);
           }
           var style = openingElement.attributes.find(function (attr) {
-            var _attr$name3;
-            return ((_attr$name3 = attr.name) === null || _attr$name3 === void 0 ? void 0 : _attr$name3.name) === "style";
+            var _attr$name5;
+            return ((_attr$name5 = attr.name) === null || _attr$name5 === void 0 ? void 0 : _attr$name5.name) === "style";
           });
           if (style) {
             style.value = t.jsxExpressionContainer(styleExpressions);
@@ -184,8 +202,8 @@ function _default(_ref) {
             state.needsGetStyle = true;
             var inheritStyleExpressions = (0, _babel.getInheritStyleExpression)(path, state, t);
             var inheritStyle = childOpeningElement.attributes.find(function (attr) {
-              var _attr$name4;
-              return ((_attr$name4 = attr.name) === null || _attr$name4 === void 0 ? void 0 : _attr$name4.name) === "inheritStyle";
+              var _attr$name6;
+              return ((_attr$name6 = attr.name) === null || _attr$name6 === void 0 ? void 0 : _attr$name6.name) === "inheritStyle";
             });
             if (inheritStyle) {
               inheritStyle.value = t.jsxExpressionContainer(inheritStyleExpressions);
