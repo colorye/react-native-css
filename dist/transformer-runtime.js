@@ -329,14 +329,16 @@ function transformStyles(stylesheet, classNames) {
 // ============================================================================
 function getInheritStyle(declarations) {
   if (!declarations) return undefined;
+  var flat = Array.isArray(declarations) ? getFlattenStyle(declarations) : declarations;
+  if (!flat || _typeof(flat) !== "object") return undefined;
   var inheritDeclarations = {};
   var _iterator2 = _createForOfIteratorHelper(INHERIT_PROPERTIES),
     _step2;
   try {
     for (_iterator2.s(); !(_step2 = _iterator2.n()).done;) {
       var key = _step2.value;
-      if (declarations[key] !== undefined) {
-        inheritDeclarations[key] = declarations[key];
+      if (flat[key] !== undefined) {
+        inheritDeclarations[key] = flat[key];
       }
     }
   } catch (err) {
@@ -398,13 +400,21 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
   var result = {};
   if (inherited) Object.assign(result, inherited);
   if (staticStyles) {
-    for (var _key in staticStyles) {
-      if (!_key.startsWith("--")) {
-        result[_key] = staticStyles[_key];
+    var flatStatic = Array.isArray(staticStyles) ? getFlattenStyle(staticStyles) : staticStyles;
+    if (flatStatic && _typeof(flatStatic) === "object") {
+      for (var _key in flatStatic) {
+        if (!_key.startsWith("--")) {
+          result[_key] = flatStatic[_key];
+        }
       }
     }
   }
-  if (inlineStyle) Object.assign(result, inlineStyle);
+  if (inlineStyle) {
+    var flatInline = Array.isArray(inlineStyle) ? getFlattenStyle(inlineStyle) : inlineStyle;
+    if (flatInline && _typeof(flatInline) === "object") {
+      Object.assign(result, flatInline);
+    }
+  }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 var _default = exports["default"] = {

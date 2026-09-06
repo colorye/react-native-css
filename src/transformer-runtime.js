@@ -313,10 +313,13 @@ function transformStyles(stylesheet, classNames) {
 function getInheritStyle(declarations) {
   if (!declarations) return undefined;
 
+  const flat = Array.isArray(declarations) ? getFlattenStyle(declarations) : declarations;
+  if (!flat || typeof flat !== "object") return undefined;
+
   const inheritDeclarations = {};
   for (const key of INHERIT_PROPERTIES) {
-    if (declarations[key] !== undefined) {
-      inheritDeclarations[key] = declarations[key];
+    if (flat[key] !== undefined) {
+      inheritDeclarations[key] = flat[key];
     }
   }
 
@@ -364,13 +367,21 @@ function mergeStyles(inheritStyle, staticStyles, inlineStyle) {
   const result = {};
   if (inherited) Object.assign(result, inherited);
   if (staticStyles) {
-    for (const key in staticStyles) {
-      if (!key.startsWith("--")) {
-        result[key] = staticStyles[key];
+    const flatStatic = Array.isArray(staticStyles) ? getFlattenStyle(staticStyles) : staticStyles;
+    if (flatStatic && typeof flatStatic === "object") {
+      for (const key in flatStatic) {
+        if (!key.startsWith("--")) {
+          result[key] = flatStatic[key];
+        }
       }
     }
   }
-  if (inlineStyle) Object.assign(result, inlineStyle);
+  if (inlineStyle) {
+    const flatInline = Array.isArray(inlineStyle) ? getFlattenStyle(inlineStyle) : inlineStyle;
+    if (flatInline && typeof flatInline === "object") {
+      Object.assign(result, flatInline);
+    }
+  }
 
   return Object.keys(result).length > 0 ? result : undefined;
 }

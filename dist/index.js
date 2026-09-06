@@ -46,14 +46,7 @@ Object.defineProperty(exports, "setGlobalStylesheet", {
     return _interop.setGlobalStylesheet;
   }
 });
-Object.defineProperty(exports, "withReactNativeCss", {
-  enumerable: true,
-  get: function get() {
-    return _metro.withReactNativeCss;
-  }
-});
 var _interop = require("./interop.js");
-var _metro = require("./metro.js");
 var _transformerRuntime = _interopRequireDefault(require("./transformer-runtime.js"));
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { "default": e }; }
 var _default = exports["default"] = {
@@ -63,6 +56,5 @@ var _default = exports["default"] = {
   getGlobalStylesheet: _interop.getGlobalStylesheet,
   GroupContext: _interop.GroupContext,
   InheritContext: _interop.InheritContext,
-  Runtime: _transformerRuntime["default"],
-  withReactNativeCss: _metro.withReactNativeCss
+  Runtime: _transformerRuntime["default"]
 };

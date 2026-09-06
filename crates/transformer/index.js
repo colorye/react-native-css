@@ -100,6 +100,7 @@ if (!nativeBinding) {
 }
 
 module.exports = {
+  compileCss: nativeBinding.compileCss,
   transformJsx: nativeBinding.transformJsx,
   resolveRuntimeStyles: nativeBinding.resolveRuntimeStyles,
 };

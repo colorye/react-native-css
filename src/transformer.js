@@ -1,14 +1,46 @@
 import fs from "fs";
 import path from "path";
-import Stylesheet from "./features/stylesheet";
-import { parseStylesheetWithLightning } from "./utils/css";
+
+let native = null;
+try {
+  native = require("./native");
+} catch {
+  try {
+    native = require("../crates/transformer");
+  } catch {}
+}
+
+let cachedStylesheet = null;
+
+function getCachedStylesheetJson(projectRoot) {
+  if (cachedStylesheet) return cachedStylesheet;
+  try {
+    const root = projectRoot || process.cwd();
+    const candidates = [
+      path.resolve(root, "index.css.json"),
+      path.resolve(root, "src/assets/styles/index.css.json"),
+      path.join(__dirname, "exported-stylesheet.json"),
+      path.resolve(__dirname, "../src/exported-stylesheet.json"),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        cachedStylesheet = fs.readFileSync(p, "utf-8");
+        return cachedStylesheet;
+      }
+    }
+  } catch {}
+  return "{}";
+}
 
 export function getStylesheet(css, filename) {
-  const rawStylesheet = parseStylesheetWithLightning(css);
-  const stylesheet = new Stylesheet();
-  stylesheet.setRawStylesheet(rawStylesheet);
+  if (!native || !native.compileCss) {
+    throw new Error(
+      "[@colorye/react-native-css] Native Rust transformer binding is not loaded. Cannot compile CSS.",
+    );
+  }
 
-  const jsonContent = stylesheet.toJSON();
+  const jsonContent = native.compileCss(css);
+  cachedStylesheet = jsonContent;
   writeStylesheetJSON(jsonContent, filename);
 
   return jsonContent;
@@ -58,9 +90,7 @@ export function transform({ src, filename, options }) {
                 const resolved = require.resolve("metro-react-native-babel-transformer", resolveOptions);
                 return eval("require")(resolved);
               } catch {
-                throw new Error(
-                  "Failed to load any upstream babel-transformer. Please ensure either '@expo/metro-config', '@react-native/metro-babel-transformer', or 'metro-react-native-babel-transformer' is installed.",
-                );
+                return null;
               }
             }
           }
@@ -71,13 +101,43 @@ export function transform({ src, filename, options }) {
 
   if (filename.endsWith(".css")) {
     const jsonContent = getStylesheet(src, filename);
-    return resolveTransformer.transform({
-      src: `const sheet = ${jsonContent};\nmodule.exports = sheet;\nmodule.exports.default = sheet;\nmodule.exports.__esModule = true;`,
-      filename,
-      options,
-    });
+    const cssCode = `const sheet = ${jsonContent};\nmodule.exports = sheet;\nmodule.exports.default = sheet;\nmodule.exports.__esModule = true;`;
+    if (resolveTransformer && resolveTransformer.transform) {
+      return resolveTransformer.transform({
+        src: cssCode,
+        filename,
+        options,
+      });
+    }
+    return { code: cssCode, map: null };
   }
-  return resolveTransformer.transform({ src, filename, options });
+
+  // Fast native Rust SWC transformer for JSX/TSX
+  if (
+    native &&
+    native.transformJsx &&
+    (filename.endsWith(".tsx") || filename.endsWith(".jsx")) &&
+    !filename.includes("node_modules")
+  ) {
+    try {
+      const stylesheetJson = options?.stylesheetJson || getCachedStylesheetJson(projectRoot);
+      const res = native.transformJsx(src, {
+        filename,
+        stylesheetJson,
+        sourceMaps: true,
+      });
+      if (res && res.code) {
+        src = res.code;
+      }
+    } catch {
+      // Graceful fallback to Babel if native transform hits unexpected syntax
+    }
+  }
+
+  if (resolveTransformer && resolveTransformer.transform) {
+    return resolveTransformer.transform({ src, filename, options });
+  }
+  return { code: src, map: null };
 }
 
 export default {

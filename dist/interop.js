@@ -26,6 +26,18 @@ function _arrayLikeToArray(r, a) { (null == a || a > r.length) && (a = r.length)
 function _iterableToArrayLimit(r, l) { var t = null == r ? null : "undefined" != typeof Symbol && r[Symbol.iterator] || r["@@iterator"]; if (null != t) { var e, n, i, u, a = [], f = !0, o = !1; try { if (i = (t = t.call(r)).next, 0 === l) { if (Object(t) !== t) return; f = !1; } else for (; !(f = (e = i.call(t)).done) && (a.push(e.value), a.length !== l); f = !0); } catch (r) { o = !0, n = r; } finally { try { if (!f && null != t["return"] && (u = t["return"](), Object(u) !== u)) return; } finally { if (o) throw n; } } return a; } }
 function _arrayWithHoles(r) { if (Array.isArray(r)) return r; }
 function _typeof(o) { "@babel/helpers - typeof"; return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (o) { return typeof o; } : function (o) { return o && "function" == typeof Symbol && o.constructor === Symbol && o !== Symbol.prototype ? "symbol" : typeof o; }, _typeof(o); }
+function shallowEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b || _typeof(a) !== "object" || _typeof(b) !== "object") return false;
+  var keysA = Object.keys(a);
+  var keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (var _i = 0, _keysA = keysA; _i < _keysA.length; _i++) {
+    var k = _keysA[_i];
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
 var InheritContext = exports.InheritContext = (0, _react.createContext)(undefined);
 var GroupContext = exports.GroupContext = (0, _react.createContext)({
   pressed: false,
@@ -96,8 +108,8 @@ function cssInterop(Component) {
     var isGroupProvider = false;
 
     // Check if this component acts as a group container
-    for (var _i = 0, _Object$keys = Object.keys(mapping); _i < _Object$keys.length; _i++) {
-      var classProp = _Object$keys[_i];
+    for (var _i2 = 0, _Object$keys = Object.keys(mapping); _i2 < _Object$keys.length; _i2++) {
+      var classProp = _Object$keys[_i2];
       var val = props[classProp];
       if (typeof val === "string" && (val === "group" || val.split(/\s+/).includes("group"))) {
         isGroupProvider = true;
@@ -117,7 +129,7 @@ function cssInterop(Component) {
       };
     }
     var _loop = function _loop() {
-      var _Object$entries$_i = _slicedToArray(_Object$entries[_i2], 2),
+      var _Object$entries$_i = _slicedToArray(_Object$entries[_i3], 2),
         classProp = _Object$entries$_i[0],
         styleProp = _Object$entries$_i[1];
       var classValue = props[classProp];
@@ -231,7 +243,7 @@ function cssInterop(Component) {
         }
       }
     };
-    for (var _i2 = 0, _Object$entries = Object.entries(mapping); _i2 < _Object$entries.length; _i2++) {
+    for (var _i3 = 0, _Object$entries = Object.entries(mapping); _i3 < _Object$entries.length; _i3++) {
       _loop();
     }
     delete nextProps.inheritStyle;
@@ -243,7 +255,7 @@ function cssInterop(Component) {
         })
       }, element);
     }
-    if (currentInherit && currentInherit !== parentInherit) {
+    if (currentInherit && !shallowEqual(currentInherit, parentInherit)) {
       return _react["default"].createElement(InheritContext.Provider, {
         value: currentInherit
       }, element);

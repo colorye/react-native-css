@@ -13,8 +13,20 @@ export interface GroupState {
   focus?: boolean;
 }
 
+export interface InheritedStyles {
+  color?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  fontFamily?: string;
+  letterSpacing?: number;
+  lineHeight?: number;
+  textAlign?: string;
+  textTransform?: string;
+  [key: string]: any;
+}
+
 export const GroupContext: React.Context<GroupState>;
-export const InheritContext: React.Context<Record<string, any> | undefined>;
+export const InheritContext: React.Context<InheritedStyles | undefined>;
 
 export function setGlobalStylesheet(sheet: Record<string, any>): void;
 export function getGlobalStylesheet(): Record<string, any>;
@@ -33,7 +45,7 @@ export function getGlobalStylesheet(): Record<string, any>;
  * });
  * ```
  */
-export function cssInterop<P extends object>(
+export function cssInterop<T = any, P extends object = any>(
   Component: React.ComponentType<P>,
   mapping?: StyleMapping
 ): React.ForwardRefExoticComponent<
@@ -41,13 +53,13 @@ export function cssInterop<P extends object>(
     className?: string;
     contentContainerClassName?: string;
     inheritStyle?: any;
-  } & React.RefAttributes<any>
+  } & React.RefAttributes<T>
 >;
 
 /**
  * Alias for cssInterop.
  */
-export function remapProps<P extends object>(
+export function remapProps<T = any, P extends object = any>(
   Component: React.ComponentType<P>,
   mapping: StyleMapping
 ): React.ForwardRefExoticComponent<
@@ -55,7 +67,7 @@ export function remapProps<P extends object>(
     className?: string;
     contentContainerClassName?: string;
     inheritStyle?: any;
-  } & React.RefAttributes<any>
+  } & React.RefAttributes<T>
 >;
 
 export namespace Runtime {
@@ -86,10 +98,6 @@ declare const _default: {
   GroupContext: typeof GroupContext;
   InheritContext: typeof InheritContext;
   Runtime: typeof Runtime;
-  getStylesheet: typeof getStylesheet;
-  transform: typeof transform;
-  writeStylesheetJSON: typeof writeStylesheetJSON;
-  withReactNativeCss: typeof withReactNativeCss;
 };
 
 export default _default;

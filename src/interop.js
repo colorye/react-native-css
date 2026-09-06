@@ -1,6 +1,18 @@
 import React, { createContext, forwardRef, useContext } from "react";
 import Runtime from "./transformer-runtime.js";
 
+function shallowEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const k of keysA) {
+    if (a[k] !== b[k]) return false;
+  }
+  return true;
+}
+
 export const InheritContext = createContext(undefined);
 export const GroupContext = createContext({ pressed: false, hovered: false, focus: false });
 
@@ -249,7 +261,7 @@ export function cssInterop(Component, mapping = { className: "style" }) {
       );
     }
 
-    if (currentInherit && currentInherit !== parentInherit) {
+    if (currentInherit && !shallowEqual(currentInherit, parentInherit)) {
       return React.createElement(InheritContext.Provider, { value: currentInherit }, element);
     }
 

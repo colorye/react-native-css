@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
+pub mod css;
+
 use swc_core::common::{
     source_map::DefaultSourceMapGenConfig,
     sync::Lrc,
@@ -21,11 +23,12 @@ pub struct TransformOutput {
     pub map: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 #[napi(object)]
 pub struct TransformOptions {
     pub filename: Option<String>,
     pub stylesheet_json: Option<String>,
+    pub raw_css: Option<String>,
     pub source_maps: Option<bool>,
 }
 
@@ -45,10 +48,8 @@ pub struct StylesheetIndex {
 }
 
 impl StylesheetIndex {
-    pub fn from_json_str(json_str: &str) -> Self {
+    pub fn from_json_val(parsed: JsonValue) -> Self {
         let mut root_vars = HashMap::new();
-        let parsed = serde_json::from_str::<JsonValue>(json_str).unwrap_or(JsonValue::Null);
-
         if let Some(root_obj) = parsed.get(":root").and_then(|v| v.as_object()) {
             for (k, v) in root_obj {
                 if let Some(s) = v.as_str() {
@@ -63,6 +64,11 @@ impl StylesheetIndex {
             raw_json: parsed,
             root_vars,
         }
+    }
+
+    pub fn from_json_str(json_str: &str) -> Self {
+        let parsed = serde_json::from_str::<JsonValue>(json_str).unwrap_or(JsonValue::Null);
+        Self::from_json_val(parsed)
     }
 
     /// Resolve a single class name on demand
@@ -2055,11 +2061,14 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
     })?;
 
     // Load stylesheet index
-    let stylesheet_json = options
-        .as_ref()
-        .and_then(|o| o.stylesheet_json.as_deref())
-        .unwrap_or("{}");
-    let stylesheet_index = StylesheetIndex::from_json_str(stylesheet_json);
+    let stylesheet_index = if let Some(json_str) = options.as_ref().and_then(|o| o.stylesheet_json.as_deref()) {
+        StylesheetIndex::from_json_str(json_str)
+    } else if let Some(raw_css) = options.as_ref().and_then(|o| o.raw_css.as_deref()) {
+        let compiled = css::compile_css_to_json(raw_css);
+        StylesheetIndex::from_json_val(compiled)
+    } else {
+        StylesheetIndex::from_json_str("{}")
+    };
 
     let mut collector = StyleSheetCollector::default();
 
@@ -2237,6 +2246,15 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
     })
 }
 
+/// Compile raw CSS string to pre-computed JSON stylesheet in Rust
+#[napi]
+pub fn compile_css(css: String) -> Result<String> {
+    let json_val = css::compile_css_to_json(&css);
+    serde_json::to_string(&json_val).map_err(|e| {
+        Error::new(Status::GenericFailure, format!("Serialization error: {}", e))
+    })
+}
+
 /// Dynamic runtime evaluator for class names & responsive styles in Rust
 #[napi]
 pub fn resolve_runtime_styles(
@@ -2383,6 +2401,7 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Box.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            raw_css: None,
             source_maps: Some(true),
         })).unwrap();
 
@@ -2496,6 +2515,7 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Button.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            raw_css: None,
             source_maps: Some(false),
         })).unwrap();
 
@@ -2533,6 +2553,7 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Key.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            raw_css: None,
             source_maps: Some(false),
         })).unwrap();
 
@@ -2578,6 +2599,7 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Button.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            raw_css: None,
             source_maps: Some(false),
         })).unwrap();
 
@@ -2610,6 +2632,7 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Card.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            raw_css: None,
             source_maps: Some(false),
         })).unwrap();
 
@@ -2644,6 +2667,7 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("Box.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            raw_css: None,
             source_maps: Some(false),
         })).unwrap();
 
@@ -2695,11 +2719,128 @@ mod tests {
         let res = transform_jsx(code, Some(TransformOptions {
             filename: Some("ThemedCard.tsx".to_string()),
             stylesheet_json: Some(sheet_json),
+            raw_css: None,
             source_maps: Some(false),
         })).unwrap();
 
         assert!(res.code.contains("variant === \"primary\""));
         assert!(res.code.contains("variant === \"secondary\""));
         assert!(res.code.contains("_rnStyles."));
+    }
+
+    #[test]
+    fn test_compile_raw_css_to_json() {
+        let raw_css = r#"
+            /* Browser resets to skip */
+            @layer base {
+                * {
+                    box-sizing: border-box;
+                    margin: 0;
+                }
+            }
+
+            :root {
+                --color-primary: #0065d6;
+                --spacing: 0.25rem;
+            }
+
+            @layer utilities {
+                .p-4 {
+                    padding: calc(var(--spacing) * 4);
+                }
+                .flex-row {
+                    flex-direction: row;
+                }
+                .custom-border {
+                    border: 2px solid #ff0000;
+                }
+                .\-mx-3 {
+                    margin-left: -12px;
+                    margin-right: -12px;
+                }
+                .active\:scale-95:active {
+                    transform: scale(0.95);
+                }
+                .w-\[48\%\] {
+                    width: 48%;
+                }
+            }
+
+            @media (min-width: 640px) {
+                .sm\:p-6 {
+                    padding: 24px;
+                }
+            }
+        "#;
+
+        let json_str = compile_css(raw_css.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        // Check :root
+        assert_eq!(parsed[":root"]["--color-primary"].as_str(), Some("#0065d6"));
+        assert_eq!(parsed[":root"]["--spacing"].as_str(), Some("0.25rem"));
+
+        // Check @layer base is skipped
+        assert!(parsed.get("*").is_none());
+
+        // Check .flex-row is static and camelized
+        assert_eq!(parsed["flex-row"]["flexDirection"].as_str(), Some("row"));
+
+        // Check .p-4 contains dynamic var/calc
+        assert!(parsed["p-4"]["_dynamic"]["padding"].as_str().unwrap().contains("var(--spacing)"));
+
+        // Check .custom-border shorthand expanded
+        let border_decl = &parsed["custom-border"];
+        assert_eq!(border_decl["borderWidth"], 2.0);
+        assert_eq!(border_decl["borderStyle"].as_str(), Some("solid"));
+        assert_eq!(border_decl["borderColor"].as_str(), Some("#ff0000"));
+
+        // Check negative margin unescaped
+        assert_eq!(parsed["-mx-3"]["marginLeft"], -12.0);
+        assert_eq!(parsed["-mx-3"]["marginRight"], -12.0);
+
+        // Check active:scale-95
+        assert!(parsed.get("active:scale-95").is_some());
+        assert!(parsed.get("scale-95").is_some());
+
+        // Check w-[48%] arbitrary value unescaped
+        assert_eq!(parsed["w-[48%]"]["width"].as_str(), Some("48%"));
+
+        // Check media query class
+        assert_eq!(parsed["sm:p-6"]["paddingTop"], 24.0);
+    }
+
+    #[test]
+    fn test_transform_jsx_with_raw_css() {
+        let code = r#"
+            import { View } from "react-native";
+            export function Widget() {
+                return <View className="p-4 flex-row" />;
+            }
+        "#.to_string();
+
+        let raw_css = r#"
+            :root {
+                --spacing: 4px;
+            }
+            .p-4 {
+                padding: calc(var(--spacing) * 4);
+            }
+            .flex-row {
+                flex-direction: row;
+            }
+        "#.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Widget.tsx".to_string()),
+            stylesheet_json: None,
+            raw_css: Some(raw_css),
+            source_maps: Some(false),
+        })).unwrap();
+
+        assert!(res.code.contains("StyleSheet.create"));
+        assert!(res.code.contains("_rnStyles"));
+        assert!(res.code.contains("flexDirection: \"row\""));
+        assert!(res.code.contains("paddingTop: 16"));
     }
 }
