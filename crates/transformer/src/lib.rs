@@ -236,11 +236,53 @@ impl StylesheetIndex {
         }
 
         // Handle React Native scale percentages e.g. "95%" -> 0.95
-        if property == "scale" {
+        if property == "scale" || property == "scaleX" || property == "scaleY" {
             let first_part = trimmed.split_whitespace().next().unwrap_or(trimmed);
             if first_part.ends_with('%') {
                 if let Ok(pct) = first_part.trim_end_matches('%').parse::<f64>() {
                     return serde_json::json!(pct / 100.0);
+                }
+            }
+            if let Ok(num) = first_part.parse::<f64>() {
+                return serde_json::json!(num);
+            }
+        }
+
+        // Handle React Native opacity: must be number between 0.0 and 1.0 (e.g. "80%" -> 0.8, "0.5" -> 0.5)
+        if property == "opacity" || property.ends_with("Opacity") {
+            let first_part = trimmed.split_whitespace().next().unwrap_or(trimmed);
+            if first_part.ends_with('%') {
+                if let Ok(pct) = first_part.trim_end_matches('%').parse::<f64>() {
+                    return serde_json::json!(pct / 100.0);
+                }
+            }
+            if let Ok(num) = first_part.parse::<f64>() {
+                return serde_json::json!(num);
+            }
+        }
+
+        // Handle React Native letterSpacing: must be number in points (e.g. "0.025em" -> 0.4, "normal" -> 0.0)
+        if property == "letterSpacing" {
+            let first_part = trimmed.split_whitespace().next().unwrap_or(trimmed);
+            if first_part == "normal" {
+                return serde_json::json!(0.0);
+            }
+            if first_part == "inherit" {
+                return serde_json::json!(null);
+            }
+            if first_part.ends_with("rem") {
+                if let Ok(num) = first_part[..first_part.len() - 3].trim().parse::<f64>() {
+                    return serde_json::json!(num * 16.0);
+                }
+            }
+            if first_part.ends_with("em") {
+                if let Ok(num) = first_part[..first_part.len() - 2].trim().parse::<f64>() {
+                    return serde_json::json!(num * 16.0);
+                }
+            }
+            if first_part.ends_with("px") {
+                if let Ok(num) = first_part[..first_part.len() - 2].trim().parse::<f64>() {
+                    return serde_json::json!(num);
                 }
             }
             if let Ok(num) = first_part.parse::<f64>() {
@@ -309,6 +351,13 @@ impl StylesheetIndex {
         // 2. Handle rem units (1.5rem -> 24)
         if trimmed.ends_with("rem") {
             if let Ok(num) = trimmed[..trimmed.len() - 3].trim().parse::<f64>() {
+                return serde_json::json!(num * 16.0);
+            }
+        }
+
+        // 2.5. Handle em units (0.025em -> 0.4)
+        if trimmed.ends_with("em") && !trimmed.ends_with("rem") {
+            if let Ok(num) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
                 return serde_json::json!(num * 16.0);
             }
         }
@@ -1171,6 +1220,56 @@ impl StylesheetIndex {
         if key == "scale" {
             prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": val }]));
             return;
+        }
+
+        if key == "opacity" || key.ends_with("Opacity") {
+            if let Some(s) = val.as_str() {
+                let trimmed = s.trim();
+                let num = if trimmed.ends_with('%') {
+                    trimmed.trim_end_matches('%').parse::<f64>().map(|p| p / 100.0).ok()
+                } else {
+                    trimmed.parse::<f64>().ok()
+                };
+                if let Some(n) = num {
+                    prop_map.insert(key.to_string(), serde_json::json!(n));
+                    return;
+                }
+            } else if val.is_number() {
+                prop_map.insert(key.to_string(), val);
+                return;
+            }
+        }
+
+        if key == "letterSpacing" {
+            if val.is_null() {
+                return;
+            }
+            if let Some(s) = val.as_str() {
+                let trimmed = s.trim();
+                if trimmed == "inherit" {
+                    return;
+                }
+                if trimmed == "normal" {
+                    prop_map.insert(key.to_string(), serde_json::json!(0.0));
+                    return;
+                }
+                let num = if trimmed.ends_with("rem") {
+                    trimmed[..trimmed.len() - 3].trim().parse::<f64>().map(|n| n * 16.0).ok()
+                } else if trimmed.ends_with("em") {
+                    trimmed[..trimmed.len() - 2].trim().parse::<f64>().map(|n| n * 16.0).ok()
+                } else if trimmed.ends_with("px") {
+                    trimmed[..trimmed.len() - 2].trim().parse::<f64>().ok()
+                } else {
+                    trimmed.parse::<f64>().ok()
+                };
+                if let Some(n) = num {
+                    prop_map.insert(key.to_string(), serde_json::json!(n));
+                    return;
+                }
+            } else if val.is_number() {
+                prop_map.insert(key.to_string(), val);
+                return;
+            }
         }
 
         if let Some(expanded) = Self::expand_border(key, &val) {
@@ -2764,6 +2863,18 @@ mod tests {
                 .w-\[48\%\] {
                     width: 48%;
                 }
+                .opacity-80 {
+                    opacity: 80%;
+                }
+                .active\:opacity-60:active {
+                    opacity: 60%;
+                }
+                .opacity-0 {
+                    opacity: 0%;
+                }
+                .tracking-wide {
+                    letter-spacing: 0.025em;
+                }
             }
 
             @media (min-width: 640px) {
@@ -2801,6 +2912,14 @@ mod tests {
 
         // Check active:scale-95
         assert!(parsed.get("active:scale-95").is_some());
+
+        // Check opacity percentages are converted to numbers for React Native
+        assert_eq!(parsed["opacity-80"]["opacity"], 0.8);
+        assert_eq!(parsed["active:opacity-60"]["opacity"], 0.6);
+        assert_eq!(parsed["opacity-0"]["opacity"], 0.0);
+
+        // Check letterSpacing em units are converted to numbers for React Native
+        assert_eq!(parsed["tracking-wide"]["letterSpacing"], 0.4);
         assert!(parsed.get("scale-95").is_some());
 
         // Check w-[48%] arbitrary value unescaped

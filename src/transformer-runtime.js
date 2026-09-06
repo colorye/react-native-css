@@ -119,6 +119,35 @@ function getFlattenStyle(declarations) {
     }
   }
 
+  if (result.opacity !== undefined && typeof result.opacity === "string") {
+    const trimmed = result.opacity.trim();
+    if (trimmed.endsWith("%")) {
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) result.opacity = num / 100;
+    } else {
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) result.opacity = num;
+    }
+  }
+
+  if (result.letterSpacing !== undefined && typeof result.letterSpacing === "string") {
+    const trimmed = result.letterSpacing.trim();
+    if (trimmed === "normal") {
+      result.letterSpacing = 0;
+    } else if (trimmed === "inherit") {
+      delete result.letterSpacing;
+    } else if (trimmed.endsWith("rem") || (trimmed.endsWith("em") && !trimmed.endsWith("rem"))) {
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) result.letterSpacing = num * 16;
+    } else if (trimmed.endsWith("px")) {
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) result.letterSpacing = num;
+    } else {
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) result.letterSpacing = num;
+    }
+  }
+
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
@@ -160,6 +189,8 @@ function resolveCssValue(prop, val, rootVars, localVars) {
 
   if (typeof v === "string" && v.endsWith("rem")) {
     v = parseFloat(v) * 16;
+  } else if (typeof v === "string" && v.endsWith("em") && !v.endsWith("rem")) {
+    v = parseFloat(v) * 16;
   } else if (typeof v === "string" && v.endsWith("px")) {
     v = parseFloat(v);
   } else if (typeof v === "string" && (v.endsWith("vh") || v.endsWith("vw"))) {
@@ -168,6 +199,55 @@ function resolveCssValue(prop, val, rootVars, localVars) {
 
   if (prop.toLowerCase().endsWith("radius") && (v === "50%" || v === "9999px" || v === 9999)) {
     return 9999;
+  }
+  if (prop === "letterSpacing") {
+    if (typeof v === "string") {
+      const trimmed = v.trim();
+      if (trimmed === "normal") return 0;
+      if (trimmed === "inherit") return undefined;
+      if (trimmed.endsWith("rem")) {
+        const num = parseFloat(trimmed);
+        if (!isNaN(num)) return num * 16;
+      }
+      if (trimmed.endsWith("em")) {
+        const num = parseFloat(trimmed);
+        if (!isNaN(num)) return num * 16;
+      }
+      if (trimmed.endsWith("px")) {
+        const num = parseFloat(trimmed);
+        if (!isNaN(num)) return num;
+      }
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) return num;
+    } else if (typeof v === "number") {
+      return v;
+    }
+  }
+  if (prop === "opacity" || prop.endsWith("Opacity")) {
+    if (typeof v === "string") {
+      const trimmed = v.trim();
+      if (trimmed.endsWith("%")) {
+        const num = parseFloat(trimmed);
+        if (!isNaN(num)) return num / 100;
+      }
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) return num;
+    } else if (typeof v === "number") {
+      return v;
+    }
+  }
+  if (prop === "scale" || prop === "scaleX" || prop === "scaleY") {
+    if (typeof v === "string") {
+      const trimmed = v.trim();
+      if (trimmed.endsWith("%")) {
+        const num = parseFloat(trimmed);
+        if (!isNaN(num)) return num / 100;
+      }
+      const num = parseFloat(trimmed);
+      if (!isNaN(num)) return num;
+    } else if (typeof v === "number") {
+      return v;
+    }
   }
   if (prop === "fontWeight") {
     return String(v).replace("px", "").replace("rem", "");
