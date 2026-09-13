@@ -199,14 +199,16 @@ export function cssInterop(Component, mapping = { className: "style" }) {
 
           if (computedStyle !== undefined) {
             nextProps[styleProp] = computedStyle;
+          } else {
+            nextProps[styleProp] = props[styleProp];
+          }
 
-            if (isPrimaryStyle) {
-              const inheritable = Runtime.getInheritStyle(computedStyle);
-              if (inheritable) {
-                currentInherit = parentInherit
-                  ? { ...parentInherit, ...inheritable }
-                  : inheritable;
-              }
+          if (isPrimaryStyle && computedStyle !== undefined) {
+            const inheritable = Runtime.getInheritStyle(computedStyle);
+            if (inheritable) {
+              currentInherit = parentInherit
+                ? { ...parentInherit, ...inheritable }
+                : inheritable;
             }
           }
         }

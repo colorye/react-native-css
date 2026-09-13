@@ -204,11 +204,13 @@ function cssInterop(Component) {
           var computedStyle = _transformerRuntime["default"].getStyle(sheet, [hasInherit ? inheritStyle : undefined, classValue, props[styleProp]]);
           if (computedStyle !== undefined) {
             nextProps[styleProp] = computedStyle;
-            if (isPrimaryStyle) {
-              var _inheritable = _transformerRuntime["default"].getInheritStyle(computedStyle);
-              if (_inheritable) {
-                currentInherit = parentInherit ? _objectSpread(_objectSpread({}, parentInherit), _inheritable) : _inheritable;
-              }
+          } else {
+            nextProps[styleProp] = props[styleProp];
+          }
+          if (isPrimaryStyle && computedStyle !== undefined) {
+            var _inheritable = _transformerRuntime["default"].getInheritStyle(computedStyle);
+            if (_inheritable) {
+              currentInherit = parentInherit ? _objectSpread(_objectSpread({}, parentInherit), _inheritable) : _inheritable;
             }
           }
         }

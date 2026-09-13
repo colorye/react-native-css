@@ -290,6 +290,14 @@ function applyResolvedEntry(resolved, entry, rootVars) {
       if (k.startsWith("--")) continue;
       const val = resolveCssValue(k, v, rootVars, localVars);
       if (val !== undefined && val !== null) {
+        // If val is a CSS function unsupported by React Native (e.g. color-mix), prefer _static fallback
+        if (typeof val === "string" && val.startsWith("color-mix(") && entry._static && entry._static[k]) {
+          const staticVal = resolveCssValue(k, entry._static[k], rootVars, localVars);
+          if (staticVal !== undefined && staticVal !== null) {
+            resolved[k] = staticVal;
+            continue;
+          }
+        }
         resolved[k] = val;
       }
     }
@@ -303,6 +311,70 @@ function applyResolvedEntry(resolved, entry, rootVars) {
         resolved[k] = val;
       }
     }
+  }
+
+  // Expand logical and composite properties for React Native compatibility
+  expandReactNativeProps(resolved);
+}
+
+function expandReactNativeProps(resolved) {
+  if (resolved.paddingInline !== undefined) {
+    resolved.paddingHorizontal = resolved.paddingInline;
+    delete resolved.paddingInline;
+  }
+  if (resolved.paddingBlock !== undefined) {
+    resolved.paddingVertical = resolved.paddingBlock;
+    delete resolved.paddingBlock;
+  }
+  if (resolved.marginInline !== undefined) {
+    resolved.marginHorizontal = resolved.marginInline;
+    delete resolved.marginInline;
+  }
+  if (resolved.marginBlock !== undefined) {
+    resolved.marginVertical = resolved.marginBlock;
+    delete resolved.marginBlock;
+  }
+  if (resolved.insetInline !== undefined) {
+    resolved.left = resolved.insetInline;
+    resolved.right = resolved.insetInline;
+    delete resolved.insetInline;
+  }
+  if (resolved.insetBlock !== undefined) {
+    resolved.top = resolved.insetBlock;
+    resolved.bottom = resolved.insetBlock;
+    delete resolved.insetBlock;
+  }
+  if (resolved.paddingInlineStart !== undefined) {
+    resolved.paddingStart = resolved.paddingInlineStart;
+    delete resolved.paddingInlineStart;
+  }
+  if (resolved.paddingInlineEnd !== undefined) {
+    resolved.paddingEnd = resolved.paddingInlineEnd;
+    delete resolved.paddingInlineEnd;
+  }
+  if (resolved.marginInlineStart !== undefined) {
+    resolved.marginStart = resolved.marginInlineStart;
+    delete resolved.marginInlineStart;
+  }
+  if (resolved.marginInlineEnd !== undefined) {
+    resolved.marginEnd = resolved.marginInlineEnd;
+    delete resolved.marginInlineEnd;
+  }
+  if (resolved.insetInlineStart !== undefined) {
+    resolved.start = resolved.insetInlineStart;
+    delete resolved.insetInlineStart;
+  }
+  if (resolved.insetInlineEnd !== undefined) {
+    resolved.end = resolved.insetInlineEnd;
+    delete resolved.insetInlineEnd;
+  }
+  if (resolved.insetBlockStart !== undefined) {
+    resolved.top = resolved.insetBlockStart;
+    delete resolved.insetBlockStart;
+  }
+  if (resolved.insetBlockEnd !== undefined) {
+    resolved.bottom = resolved.insetBlockEnd;
+    delete resolved.insetBlockEnd;
   }
 }
 

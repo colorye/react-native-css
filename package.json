@@ -16,7 +16,7 @@
   "scripts": {
     "prepare": "yarn build:js",
     "build:native": "node scripts/build-native.js",
-    "build:js": "rm -rf ./dist && yarn run babel ./src -d ./dist --copy-files && cp src/index.d.ts dist/index.d.ts",
+    "build:js": "yarn run babel ./src -d ./dist --copy-files && cp src/index.d.ts dist/index.d.ts",
     "build": "yarn build:native && yarn build:js"
   },
   "devDependencies": {

@@ -1485,6 +1485,21 @@ impl StyleSheetCollector {
             prop: MemberProp::Ident(IdentName::new(id.into(), DUMMY_SP)),
         })
     }
+
+    pub fn snapshot(&self) -> (usize, usize) {
+        (self.styles_in_order.len(), self.counter)
+    }
+
+    pub fn rollback(&mut self, snapshot: (usize, usize)) {
+        if self.styles_in_order.len() > snapshot.0 {
+            for (_, val) in self.styles_in_order.drain(snapshot.0..) {
+                if let Ok(serialized) = serde_json::to_string(&val) {
+                    self.style_map.remove(&serialized);
+                }
+            }
+            self.counter = snapshot.1;
+        }
+    }
 }
 
 /// AST Visitor that transforms JSX elements
@@ -1608,8 +1623,21 @@ impl<'a> CssTransformerVisitor<'a> {
             // String literal: "bg-blue-500 border-green-500"
             Expr::Lit(Lit::Str(s)) => {
                 let s_str = s.value.as_str()?;
+                if s_str.trim().is_empty() {
+                    return Some(Expr::Ident(Ident::new_no_ctxt("undefined".into(), DUMMY_SP)));
+                }
                 let (normal, _, _, _, _) = self.resolve_class_string(s_str, disabled_prop_expr)?;
                 normal
+            }
+
+            // Literal null -> undefined for RN style
+            Expr::Lit(Lit::Null(_)) => {
+                Some(Expr::Ident(Ident::new_no_ctxt("undefined".into(), DUMMY_SP)))
+            }
+
+            // Literal false -> undefined for RN style
+            Expr::Lit(Lit::Bool(b)) if !b.value => {
+                Some(Expr::Ident(Ident::new_no_ctxt("undefined".into(), DUMMY_SP)))
             }
 
             // Parenthesized expression: (a ? "bg-1" : "bg-2")
@@ -1658,7 +1686,8 @@ impl<'a> CssTransformerVisitor<'a> {
 
     /// Try resolving an AST expression (literal, template literal, or ternary) into a style Expr
     fn transform_class_expr(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>, is_pressable: bool) -> Option<Expr> {
-        match expr {
+        let snapshot = self.collector.snapshot();
+        let res = match expr {
             // 1. String literal: "p-4 bg-primary"
             Expr::Lit(Lit::Str(s)) => {
                 let s_str = s.value.as_str()?;
@@ -1675,6 +1704,18 @@ impl<'a> CssTransformerVisitor<'a> {
 
             // 2. Template literal: `p-4 items-center ${isActive ? "bg-primary" : "bg-black"}`
             Expr::Tpl(tpl) => {
+                let mut dynamic_exprs: Vec<Expr> = Vec::new();
+
+                for dynamic_part in &tpl.exprs {
+                    if let Some(dyn_expr) = self.transform_dynamic_branch(dynamic_part, disabled_prop_expr) {
+                        dynamic_exprs.push(dyn_expr);
+                    } else {
+                        // If any interpolation part cannot be resolved statically (e.g. function call, variable),
+                        // do not discard it! Bail out so runtime cssInterop handles the className.
+                        return None;
+                    }
+                }
+
                 let mut static_classes = Vec::new();
                 for quasi in &tpl.quasis {
                     let raw = quasi.raw.as_str();
@@ -1685,15 +1726,8 @@ impl<'a> CssTransformerVisitor<'a> {
                     .resolve_class_string(&static_str, disabled_prop_expr)
                     .unwrap_or((None, None, None, None, None));
 
-                let mut dynamic_exprs: Vec<Expr> = Vec::new();
                 if let Some(bn) = base_normal {
-                    dynamic_exprs.push(bn);
-                }
-
-                for dynamic_part in &tpl.exprs {
-                    if let Some(dyn_expr) = self.transform_dynamic_branch(dynamic_part, disabled_prop_expr) {
-                        dynamic_exprs.push(dyn_expr);
-                    }
+                    dynamic_exprs.insert(0, bn);
                 }
 
                 if dynamic_exprs.is_empty() && base_active.is_none() && base_group_active.is_none() && base_disabled.is_none() {
@@ -1716,7 +1750,13 @@ impl<'a> CssTransformerVisitor<'a> {
             }
 
             _ => None,
+        };
+
+        if res.is_none() {
+            self.collector.rollback(snapshot);
         }
+
+        res
     }
 
     /// Build combined style expression (wrapping with ({ pressed }) => [...] if active styles exist)
@@ -2233,8 +2273,20 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
                 last_import_idx = Some(idx);
                 let src_str = import_decl.src.value.as_str().unwrap_or("");
                 if src_str == "react-native" || src_str == "react-native-web" {
+                    // `import type { ... } from "react-native"` is erased at compile time, so it
+                    // cannot carry the runtime `StyleSheet` binding that `_rnStyles` needs. A
+                    // namespace import (`import * as RN`) cannot host a named specifier at all.
+                    // Skip both and let the fallback below emit a dedicated value import.
+                    let is_namespace_import = import_decl
+                        .specifiers
+                        .iter()
+                        .any(|spec| matches!(spec, ImportSpecifier::Namespace(_)));
+                    if import_decl.type_only || is_namespace_import {
+                        continue;
+                    }
+
                     has_rn_import = true;
-                    for spec in &import_decl.specifiers {
+                    for spec in &mut import_decl.specifiers {
                         if let ImportSpecifier::Named(named) = spec {
                             let name = named
                                 .imported
@@ -2245,6 +2297,9 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
                                 })
                                 .unwrap_or_else(|| named.local.sym.as_str());
                             if name == "StyleSheet" {
+                                // `import { type StyleSheet }` is erased too: promote the
+                                // specifier to a value import instead of adding a duplicate.
+                                named.is_type_only = false;
                                 has_stylesheet_specifier = true;
                                 break;
                             }
@@ -2466,7 +2521,44 @@ pub fn resolve_runtime_styles(
 
         if let Some(props) = index.get_class_style(cls) {
             for (k, v) in props {
-                merged.insert(k, v);
+                // Logical expansions for React Native
+                match k.as_str() {
+                    "paddingInline" => {
+                        merged.insert("paddingHorizontal".to_string(), v);
+                    }
+                    "paddingBlock" => {
+                        merged.insert("paddingVertical".to_string(), v);
+                    }
+                    "marginInline" => {
+                        merged.insert("marginHorizontal".to_string(), v);
+                    }
+                    "marginBlock" => {
+                        merged.insert("marginVertical".to_string(), v);
+                    }
+                    "insetInline" => {
+                        merged.insert("left".to_string(), v.clone());
+                        merged.insert("right".to_string(), v);
+                    }
+                    "insetBlock" => {
+                        merged.insert("top".to_string(), v.clone());
+                        merged.insert("bottom".to_string(), v);
+                    }
+                    "paddingInlineStart" => {
+                        merged.insert("paddingStart".to_string(), v);
+                    }
+                    "paddingInlineEnd" => {
+                        merged.insert("paddingEnd".to_string(), v);
+                    }
+                    "marginInlineStart" => {
+                        merged.insert("marginStart".to_string(), v);
+                    }
+                    "marginInlineEnd" => {
+                        merged.insert("marginEnd".to_string(), v);
+                    }
+                    _ => {
+                        merged.insert(k, v);
+                    }
+                }
             }
         }
     }
@@ -2479,6 +2571,111 @@ pub fn resolve_runtime_styles(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_stylesheet_import_skips_type_only_declaration() {
+        // A type-only import is erased at compile time, so appending `StyleSheet` to it left
+        // `_rnStyles = StyleSheet.create(...)` referencing an undefined binding at runtime.
+        let code = r##"
+            import type { ViewStyle } from "react-native";
+            export function Box() {
+                return <View className="p-4" />;
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "p-4": { "_static": { "padding": 16 } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Box.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            raw_css: None,
+            source_maps: None,
+        })).unwrap();
+
+        assert!(res.code.contains("StyleSheet.create"));
+        // The type-only declaration must be left alone ...
+        assert!(!res.code.contains("import type { ViewStyle, StyleSheet }"));
+        // ... and a real value import must be emitted for the runtime binding.
+        assert!(res.code.contains("import { StyleSheet } from \"react-native\""));
+    }
+
+    #[test]
+    fn test_stylesheet_import_promotes_inline_type_only_specifier() {
+        // `import { type StyleSheet }` is erased as well; promote it instead of duplicating it.
+        let code = r##"
+            import { type StyleSheet, View } from "react-native";
+            export function Box() {
+                return <View className="p-4" />;
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "p-4": { "_static": { "padding": 16 } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Box.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            raw_css: None,
+            source_maps: None,
+        })).unwrap();
+
+        assert!(res.code.contains("StyleSheet.create"));
+        assert!(!res.code.contains("type StyleSheet"));
+        assert_eq!(res.code.matches("from \"react-native\"").count(), 1);
+    }
+
+    #[test]
+    fn test_stylesheet_import_skips_namespace_import() {
+        // `import * as RN` cannot host a named specifier, so a separate import is required.
+        let code = r##"
+            import * as RN from "react-native";
+            export function Box() {
+                return <View className="p-4" />;
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "p-4": { "_static": { "padding": 16 } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Box.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            raw_css: None,
+            source_maps: None,
+        })).unwrap();
+
+        assert!(res.code.contains("StyleSheet.create"));
+        assert!(res.code.contains("import { StyleSheet } from \"react-native\""));
+        assert!(res.code.contains("import * as RN from \"react-native\""));
+    }
+
+    #[test]
+    fn test_stylesheet_import_reuses_existing_value_import() {
+        let code = r##"
+            import { StyleSheet, View } from "react-native";
+            export function Box() {
+                return <View className="p-4" />;
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "p-4": { "_static": { "padding": 16 } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Box.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            raw_css: None,
+            source_maps: None,
+        })).unwrap();
+
+        assert!(res.code.contains("StyleSheet.create"));
+        assert_eq!(res.code.matches("from \"react-native\"").count(), 1);
+    }
 
     #[test]
     fn test_transform_with_sourcemap_v3() {
@@ -2659,6 +2856,64 @@ mod tests {
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles"));
         assert!(res.code.contains("isActive ? _rnStyles."));
+    }
+
+    #[test]
+    fn test_transform_template_literal_with_unresolvable_call() {
+        let code = r##"
+            import { View } from "react-native";
+            export function Footer({ getPositionStyle, versionText }) {
+                return (
+                    <View className={`absolute bottom-2 ${getPositionStyle()}`}>{versionText}</View>
+                );
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "absolute": { "_static": { "position": "absolute" } },
+            "bottom-2": { "_static": { "bottom": 8 } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Footer.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            raw_css: None,
+            source_maps: Some(false),
+        })).unwrap();
+
+        // Must NOT strip className or drop getPositionStyle()!
+        assert!(res.code.contains("getPositionStyle()"));
+        assert!(res.code.contains("className"));
+        assert!(!res.code.contains("StyleSheet.create"));
+    }
+
+    #[test]
+    fn test_transform_ternary_with_empty_string_and_null() {
+        let code = r##"
+            import { View } from "react-native";
+            export function Button({ isActive, isSelected }) {
+                return (
+                    <>
+                        <View className={isActive ? "bg-primary" : ""} />
+                        <View className={isSelected ? "bg-primary" : null} />
+                    </>
+                );
+            }
+        "##.to_string();
+
+        let sheet_json = r##"{
+            "bg-primary": { "_static": { "backgroundColor": "#53c2bc" } }
+        }"##.to_string();
+
+        let res = transform_jsx(code, Some(TransformOptions {
+            filename: Some("Button.tsx".to_string()),
+            stylesheet_json: Some(sheet_json),
+            raw_css: None,
+            source_maps: Some(false),
+        })).unwrap();
+
+        assert!(res.code.contains("isActive ? _rnStyles._s0 : undefined"));
+        assert!(res.code.contains("isSelected ? _rnStyles._s0 : undefined"));
     }
 
     #[test]
@@ -2961,5 +3216,20 @@ mod tests {
         assert!(res.code.contains("_rnStyles"));
         assert!(res.code.contains("flexDirection: \"row\""));
         assert!(res.code.contains("paddingTop: 16"));
+    }
+
+    #[test]
+    fn test_resolve_runtime_styles_logical_properties() {
+        let sheet_json = r##"{
+            "px-3": { "_dynamic": { "paddingInline": "12px" }, "_static": {} },
+            "py-2": { "_dynamic": { "paddingBlock": "8px" }, "_static": {} }
+        }"##.to_string();
+
+        let resolved = resolve_runtime_styles(sheet_json, "px-3 py-2".to_string(), None).unwrap();
+        let map: serde_json::Value = serde_json::from_str(&resolved).unwrap();
+        assert_eq!(map["paddingHorizontal"], 12.0);
+        assert_eq!(map["paddingVertical"], 8.0);
+        assert!(map.get("paddingInline").is_none());
+        assert!(map.get("paddingBlock").is_none());
     }
 }
