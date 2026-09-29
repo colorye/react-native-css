@@ -71,7 +71,8 @@ pub fn flatten_blocks(css: &str) -> String {
             let lower = remaining.to_ascii_lowercase();
 
             // Skip @layer base or @property
-            let is_layer_base = lower.starts_with("@layer base") || lower.starts_with("@layer  base");
+            let is_layer_base =
+                lower.starts_with("@layer base") || lower.starts_with("@layer  base");
             let is_property = lower.starts_with("@property");
 
             let is_unwrap_layer = lower.starts_with("@layer") || lower.starts_with("@supports");
@@ -148,15 +149,19 @@ pub fn clean_selector(sel: &str) -> Vec<String> {
     let chars: Vec<char> = after_dot.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        if chars[i] == '\\' {
-            if i + 1 < chars.len() {
-                class_part.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            class_part.push(chars[i + 1]);
+            i += 2;
+            continue;
         }
         // Stop at unescaped pseudo-classes (that are not part of escaped class name) or combinators
-        if chars[i] == ':' || chars[i] == ' ' || chars[i] == '>' || chars[i] == '~' || chars[i] == '+' || chars[i] == '[' {
+        if chars[i] == ':'
+            || chars[i] == ' '
+            || chars[i] == '>'
+            || chars[i] == '~'
+            || chars[i] == '+'
+            || chars[i] == '['
+        {
             break;
         }
         class_part.push(chars[i]);
@@ -359,9 +364,9 @@ pub fn parse_rules(css: &str) -> Vec<RawRule> {
             i += 1; // skip '}'
         }
 
-        if header_trimmed.starts_with("@media") {
+        if let Some(media_query) = header_trimmed.strip_prefix("@media") {
             // Nested media rules
-            let query = header_trimmed[6..].trim().to_string();
+            let query = media_query.trim().to_string();
             let inner_rules = parse_rules(&body);
             for mut r in inner_rules {
                 r.media_query = Some(query.clone());
@@ -456,7 +461,11 @@ pub fn compile_css_to_json(raw_css: &str) -> JsonValue {
                     } else {
                         // Static property: resolve units, colors, calc, RN specifics
                         let resolved = dummy_index.resolve_css_value(val, prop, &HashMap::new());
-                        StylesheetIndex::insert_resolved_property(&mut static_props, prop, resolved);
+                        StylesheetIndex::insert_resolved_property(
+                            &mut static_props,
+                            prop,
+                            resolved,
+                        );
                     }
                 }
 
@@ -469,12 +478,17 @@ pub fn compile_css_to_json(raw_css: &str) -> JsonValue {
                 });
 
                 if let Some(entry_obj) = existing_entry.as_object_mut() {
-                    if let Some(st_val) = entry_obj.get_mut("_static").and_then(|v| v.as_object_mut()) {
+                    if let Some(st_val) =
+                        entry_obj.get_mut("_static").and_then(|v| v.as_object_mut())
+                    {
                         for (k, v) in static_props {
                             st_val.insert(k, v);
                         }
                     }
-                    if let Some(dy_val) = entry_obj.get_mut("_dynamic").and_then(|v| v.as_object_mut()) {
+                    if let Some(dy_val) = entry_obj
+                        .get_mut("_dynamic")
+                        .and_then(|v| v.as_object_mut())
+                    {
                         for (k, v) in dynamic_props {
                             dy_val.insert(k, v);
                         }
@@ -490,7 +504,11 @@ pub fn compile_css_to_json(raw_css: &str) -> JsonValue {
             continue;
         }
         if let Some(obj) = v.as_object_mut() {
-            let dyn_empty = obj.get("_dynamic").and_then(|d| d.as_object()).map(|d| d.is_empty()).unwrap_or(true);
+            let dyn_empty = obj
+                .get("_dynamic")
+                .and_then(|d| d.as_object())
+                .map(|d| d.is_empty())
+                .unwrap_or(true);
             if dyn_empty {
                 if let Some(st) = obj.get("_static").cloned() {
                     *v = st;

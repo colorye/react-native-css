@@ -7,9 +7,7 @@ use std::collections::HashMap;
 pub mod css;
 
 use swc_core::common::{
-    source_map::DefaultSourceMapGenConfig,
-    sync::Lrc,
-    FileName, SourceMap, DUMMY_SP,
+    source_map::DefaultSourceMapGenConfig, sync::Lrc, FileName, SourceMap, DUMMY_SP,
 };
 use swc_core::ecma::ast::*;
 use swc_core::ecma::codegen::{text_writer::JsWriter, Config, Emitter};
@@ -74,21 +72,25 @@ impl StylesheetIndex {
     /// Resolve a single class name on demand
     pub fn get_class_style(&self, class_name: &str) -> Option<HashMap<String, JsonValue>> {
         let trimmed_class = class_name.trim();
-        let class_val = self.raw_json.get(trimmed_class)
-            .or_else(|| self.raw_json.get(&format!("active:{}", trimmed_class)))
-            .or_else(|| self.raw_json.get(&format!("disabled:{}", trimmed_class)))
-            .or_else(|| self.raw_json.get(&format!("group-active:{}", trimmed_class)))
+        let class_val = self
+            .raw_json
+            .get(trimmed_class)
+            .or_else(|| self.raw_json.get(format!("active:{}", trimmed_class)))
+            .or_else(|| self.raw_json.get(format!("disabled:{}", trimmed_class)))
+            .or_else(|| self.raw_json.get(format!("group-active:{}", trimmed_class)))
             .or_else(|| {
-                trimmed_class.strip_prefix("active:")
+                trimmed_class
+                    .strip_prefix("active:")
                     .or_else(|| trimmed_class.strip_prefix("pressed:"))
                     .or_else(|| trimmed_class.strip_prefix("disabled:"))
                     .or_else(|| trimmed_class.strip_prefix("group-active:"))
                     .or_else(|| trimmed_class.strip_prefix("group-pressed:"))
                     .and_then(|rest| {
-                        self.raw_json.get(rest)
-                            .or_else(|| self.raw_json.get(&format!("disabled:{}", rest)))
-                            .or_else(|| self.raw_json.get(&format!("active:{}", rest)))
-                            .or_else(|| self.raw_json.get(&format!("group-active:{}", rest)))
+                        self.raw_json
+                            .get(rest)
+                            .or_else(|| self.raw_json.get(format!("disabled:{}", rest)))
+                            .or_else(|| self.raw_json.get(format!("active:{}", rest)))
+                            .or_else(|| self.raw_json.get(format!("group-active:{}", rest)))
                     })
             })?;
         let mut prop_map = HashMap::new();
@@ -202,7 +204,12 @@ impl StylesheetIndex {
     }
 
     /// Resolve unit (rem -> px, px, calc evaluation, React Native specific conversions, transitions)
-    pub fn resolve_css_value(&self, input: &str, property: &str, local_vars: &HashMap<String, String>) -> JsonValue {
+    pub fn resolve_css_value(
+        &self,
+        input: &str,
+        property: &str,
+        local_vars: &HashMap<String, String>,
+    ) -> JsonValue {
         let after_vars = self.resolve_vars(input, local_vars);
         let trimmed_raw = after_vars.trim();
 
@@ -223,13 +230,16 @@ impl StylesheetIndex {
         };
 
         // Handle animation & transition timing (e.g. "150ms" -> 150, "0.3s" -> 300)
-        if property == "transitionDuration" || property == "animationDuration" || property == "transitionDelay" {
-            if trimmed.ends_with("ms") {
-                if let Ok(ms) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
+        if property == "transitionDuration"
+            || property == "animationDuration"
+            || property == "transitionDelay"
+        {
+            if let Some(ms_str) = trimmed.strip_suffix("ms") {
+                if let Ok(ms) = ms_str.trim().parse::<f64>() {
                     return serde_json::json!(ms);
                 }
-            } else if trimmed.ends_with('s') {
-                if let Ok(s) = trimmed[..trimmed.len() - 1].trim().parse::<f64>() {
+            } else if let Some(s_str) = trimmed.strip_suffix('s') {
+                if let Ok(s) = s_str.trim().parse::<f64>() {
                     return serde_json::json!(s * 1000.0);
                 }
             }
@@ -270,18 +280,18 @@ impl StylesheetIndex {
             if first_part == "inherit" {
                 return serde_json::json!(null);
             }
-            if first_part.ends_with("rem") {
-                if let Ok(num) = first_part[..first_part.len() - 3].trim().parse::<f64>() {
+            if let Some(rem_str) = first_part.strip_suffix("rem") {
+                if let Ok(num) = rem_str.trim().parse::<f64>() {
                     return serde_json::json!(num * 16.0);
                 }
             }
-            if first_part.ends_with("em") {
-                if let Ok(num) = first_part[..first_part.len() - 2].trim().parse::<f64>() {
+            if let Some(em_str) = first_part.strip_suffix("em") {
+                if let Ok(num) = em_str.trim().parse::<f64>() {
                     return serde_json::json!(num * 16.0);
                 }
             }
-            if first_part.ends_with("px") {
-                if let Ok(num) = first_part[..first_part.len() - 2].trim().parse::<f64>() {
+            if let Some(px_str) = first_part.strip_suffix("px") {
+                if let Ok(num) = px_str.trim().parse::<f64>() {
                     return serde_json::json!(num);
                 }
             }
@@ -291,8 +301,15 @@ impl StylesheetIndex {
         }
 
         // Handle React Native borderStyle: must be string "solid", "dashed", "dotted"
-        if property.ends_with("Style") || property.ends_with("borderStyle") || property == "borderStyle" {
-            let valid_style = if trimmed == "dotted" || trimmed == "dashed" { trimmed } else { "solid" };
+        if property.ends_with("Style")
+            || property.ends_with("borderStyle")
+            || property == "borderStyle"
+        {
+            let valid_style = if trimmed == "dotted" || trimmed == "dashed" {
+                trimmed
+            } else {
+                "solid"
+            };
             return serde_json::json!(valid_style);
         }
 
@@ -303,7 +320,9 @@ impl StylesheetIndex {
         }
 
         // Handle rounded-full in React Native (50% or infinity -> 9999)
-        if property.contains("Radius") && (trimmed == "50%" || trimmed.contains("infinity") || trimmed == "9999px") {
+        if property.contains("Radius")
+            && (trimmed == "50%" || trimmed.contains("infinity") || trimmed == "9999px")
+        {
             return serde_json::json!(9999.0);
         }
 
@@ -339,9 +358,7 @@ impl StylesheetIndex {
         // 1. Handle calc(a * b) or calc(a + b)
         if trimmed.starts_with("calc(") && trimmed.ends_with(')') {
             let inner = trimmed[5..trimmed.len() - 1].trim();
-            let converted = inner
-                .replace("rem", " * 16")
-                .replace("px", "");
+            let converted = inner.replace("rem", " * 16").replace("px", "");
 
             if let Some(num) = Self::eval_simple_math(&converted) {
                 return serde_json::json!(num);
@@ -349,22 +366,24 @@ impl StylesheetIndex {
         }
 
         // 2. Handle rem units (1.5rem -> 24)
-        if trimmed.ends_with("rem") {
-            if let Ok(num) = trimmed[..trimmed.len() - 3].trim().parse::<f64>() {
+        if let Some(rem_str) = trimmed.strip_suffix("rem") {
+            if let Ok(num) = rem_str.trim().parse::<f64>() {
                 return serde_json::json!(num * 16.0);
             }
         }
 
         // 2.5. Handle em units (0.025em -> 0.4)
-        if trimmed.ends_with("em") && !trimmed.ends_with("rem") {
-            if let Ok(num) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
-                return serde_json::json!(num * 16.0);
+        if !trimmed.ends_with("rem") {
+            if let Some(em_str) = trimmed.strip_suffix("em") {
+                if let Ok(num) = em_str.trim().parse::<f64>() {
+                    return serde_json::json!(num * 16.0);
+                }
             }
         }
 
         // 3. Handle px units (24px -> 24)
-        if trimmed.ends_with("px") {
-            if let Ok(num) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
+        if let Some(px_str) = trimmed.strip_suffix("px") {
+            if let Ok(num) = px_str.trim().parse::<f64>() {
                 return serde_json::json!(num);
             }
         }
@@ -404,7 +423,11 @@ impl StylesheetIndex {
         };
 
         let parts: Vec<&str> = if hsl_part.contains(',') {
-            hsl_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+            hsl_part
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect()
         } else {
             hsl_part.split_whitespace().collect()
         };
@@ -437,17 +460,35 @@ impl StylesheetIndex {
         let (r, g, b) = if s == 0.0 {
             (l, l, l)
         } else {
-            let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+            let q = if l < 0.5 {
+                l * (1.0 + s)
+            } else {
+                l + s - l * s
+            };
             let p = 2.0 * l - q;
             let hue_to_rgb = |mut t: f64| {
-                if t < 0.0 { t += 1.0; }
-                if t > 1.0 { t -= 1.0; }
-                if t < 1.0 / 6.0 { return p + (q - p) * 6.0 * t; }
-                if t < 1.0 / 2.0 { return q; }
-                if t < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - t) * 6.0; }
+                if t < 0.0 {
+                    t += 1.0;
+                }
+                if t > 1.0 {
+                    t -= 1.0;
+                }
+                if t < 1.0 / 6.0 {
+                    return p + (q - p) * 6.0 * t;
+                }
+                if t < 1.0 / 2.0 {
+                    return q;
+                }
+                if t < 2.0 / 3.0 {
+                    return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+                }
                 p
             };
-            (hue_to_rgb(h + 1.0 / 3.0), hue_to_rgb(h), hue_to_rgb(h - 1.0 / 3.0))
+            (
+                hue_to_rgb(h + 1.0 / 3.0),
+                hue_to_rgb(h),
+                hue_to_rgb(h - 1.0 / 3.0),
+            )
         };
 
         let r_byte = (r * 255.0).round().clamp(0.0, 255.0) as u8;
@@ -458,7 +499,10 @@ impl StylesheetIndex {
             Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
         } else {
             let a_byte = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
-            Some(format!("#{:02x}{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte, a_byte))
+            Some(format!(
+                "#{:02x}{:02x}{:02x}{:02x}",
+                r_byte, g_byte, b_byte, a_byte
+            ))
         }
     }
 
@@ -472,7 +516,11 @@ impl StylesheetIndex {
         };
 
         let components: Vec<&str> = if rgb_part.contains(',') {
-            rgb_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+            rgb_part
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect()
         } else {
             rgb_part.split_whitespace().collect()
         };
@@ -527,7 +575,11 @@ impl StylesheetIndex {
         };
 
         let parts: Vec<&str> = if lab_part.contains(',') {
-            lab_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+            lab_part
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect()
         } else {
             lab_part.split_whitespace().collect()
         };
@@ -593,7 +645,10 @@ impl StylesheetIndex {
             Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
         } else {
             let a_byte = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
-            Some(format!("#{:02x}{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte, a_byte))
+            Some(format!(
+                "#{:02x}{:02x}{:02x}{:02x}",
+                r_byte, g_byte, b_byte, a_byte
+            ))
         }
     }
 
@@ -605,7 +660,11 @@ impl StylesheetIndex {
         };
 
         let parts: Vec<&str> = if oklch_part.contains(',') {
-            oklch_part.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect()
+            oklch_part
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .collect()
         } else {
             oklch_part.split_whitespace().collect()
         };
@@ -670,7 +729,10 @@ impl StylesheetIndex {
             Some(format!("#{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte))
         } else {
             let a_byte = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
-            Some(format!("#{:02x}{:02x}{:02x}{:02x}", r_byte, g_byte, b_byte, a_byte))
+            Some(format!(
+                "#{:02x}{:02x}{:02x}{:02x}",
+                r_byte, g_byte, b_byte, a_byte
+            ))
         }
     }
 
@@ -679,15 +741,26 @@ impl StylesheetIndex {
         if trimmed == "transparent" {
             return Some((0, 0, 0, 0.0));
         }
-        if trimmed == "white" { return Some((255, 255, 255, 1.0)); }
-        if trimmed == "black" { return Some((0, 0, 0, 1.0)); }
-        if trimmed == "red" { return Some((255, 0, 0, 1.0)); }
-        if trimmed == "green" { return Some((0, 128, 0, 1.0)); }
-        if trimmed == "blue" { return Some((0, 0, 255, 1.0)); }
-        if trimmed == "yellow" { return Some((255, 255, 0, 1.0)); }
+        if trimmed == "white" {
+            return Some((255, 255, 255, 1.0));
+        }
+        if trimmed == "black" {
+            return Some((0, 0, 0, 1.0));
+        }
+        if trimmed == "red" {
+            return Some((255, 0, 0, 1.0));
+        }
+        if trimmed == "green" {
+            return Some((0, 128, 0, 1.0));
+        }
+        if trimmed == "blue" {
+            return Some((0, 0, 255, 1.0));
+        }
+        if trimmed == "yellow" {
+            return Some((255, 255, 0, 1.0));
+        }
 
-        if trimmed.starts_with('#') {
-            let hex = &trimmed[1..];
+        if let Some(hex) = trimmed.strip_prefix('#') {
             if hex.len() == 3 {
                 let r = u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?;
                 let g = u8::from_str_radix(&hex[1..2].repeat(2), 16).ok()?;
@@ -743,9 +816,11 @@ impl StylesheetIndex {
         let mut depth = 0;
         let mut split_pos = None;
         for (i, c) in args_str.char_indices() {
-            if c == '(' { depth += 1; }
-            else if c == ')' { depth -= 1; }
-            else if c == ',' && depth == 0 {
+            if c == '(' {
+                depth += 1;
+            } else if c == ')' {
+                depth -= 1;
+            } else if c == ',' && depth == 0 {
                 split_pos = Some(i);
                 break;
             }
@@ -758,11 +833,21 @@ impl StylesheetIndex {
         let parse_arg = |arg: &str| -> (String, Option<f64>) {
             let parts: Vec<&str> = arg.split_whitespace().collect();
             if parts.len() >= 2 && parts.last().unwrap().ends_with('%') {
-                let pct = parts.last().unwrap().trim_end_matches('%').parse::<f64>().ok();
+                let pct = parts
+                    .last()
+                    .unwrap()
+                    .trim_end_matches('%')
+                    .parse::<f64>()
+                    .ok();
                 let col = parts[..parts.len() - 1].join(" ");
                 (col, pct)
             } else if parts.len() >= 2 && parts.first().unwrap().ends_with('%') {
-                let pct = parts.first().unwrap().trim_end_matches('%').parse::<f64>().ok();
+                let pct = parts
+                    .first()
+                    .unwrap()
+                    .trim_end_matches('%')
+                    .parse::<f64>()
+                    .ok();
                 let col = parts[1..].join(" ");
                 (col, pct)
             } else {
@@ -779,7 +864,11 @@ impl StylesheetIndex {
         let (w1, w2) = match (p1, p2) {
             (Some(v1), Some(v2)) => {
                 let sum = v1 + v2;
-                if sum > 100.0 { (v1 / sum * 100.0, v2 / sum * 100.0) } else { (v1, v2) }
+                if sum > 100.0 {
+                    (v1 / sum * 100.0, v2 / sum * 100.0)
+                } else {
+                    (v1, v2)
+                }
             }
             (Some(v1), None) => (v1, 100.0 - v1),
             (None, Some(v2)) => (100.0 - v2, v2),
@@ -795,17 +884,36 @@ impl StylesheetIndex {
         let f2 = w2 / total_weight;
 
         let mixed_a = a1 * f1 + a2 * f2;
-        let mixed_r = if mixed_a == 0.0 { 0 } else { ((r1 as f64 * a1 * f1 + r2 as f64 * a2 * f2) / mixed_a).round() as u8 };
-        let mixed_g = if mixed_a == 0.0 { 0 } else { ((g1 as f64 * a1 * f1 + g2 as f64 * a2 * f2) / mixed_a).round() as u8 };
-        let mixed_b = if mixed_a == 0.0 { 0 } else { ((b1 as f64 * a1 * f1 + b2 as f64 * a2 * f2) / mixed_a).round() as u8 };
+        let mixed_r = if mixed_a == 0.0 {
+            0
+        } else {
+            ((r1 as f64 * a1 * f1 + r2 as f64 * a2 * f2) / mixed_a).round() as u8
+        };
+        let mixed_g = if mixed_a == 0.0 {
+            0
+        } else {
+            ((g1 as f64 * a1 * f1 + g2 as f64 * a2 * f2) / mixed_a).round() as u8
+        };
+        let mixed_b = if mixed_a == 0.0 {
+            0
+        } else {
+            ((b1 as f64 * a1 * f1 + b2 as f64 * a2 * f2) / mixed_a).round() as u8
+        };
 
-        let final_a = if total_weight < 100.0 { mixed_a * (total_weight / 100.0) } else { mixed_a };
+        let final_a = if total_weight < 100.0 {
+            mixed_a * (total_weight / 100.0)
+        } else {
+            mixed_a
+        };
 
         if (final_a - 1.0).abs() < f64::EPSILON {
             Some(format!("#{:02x}{:02x}{:02x}", mixed_r, mixed_g, mixed_b))
         } else {
             let a_byte = (final_a * 255.0).round().clamp(0.0, 255.0) as u8;
-            Some(format!("#{:02x}{:02x}{:02x}{:02x}", mixed_r, mixed_g, mixed_b, a_byte))
+            Some(format!(
+                "#{:02x}{:02x}{:02x}{:02x}",
+                mixed_r, mixed_g, mixed_b, a_byte
+            ))
         }
     }
 
@@ -918,13 +1026,13 @@ impl StylesheetIndex {
 
     pub fn parse_unit_val(s: &str) -> JsonValue {
         let trimmed = s.trim();
-        if trimmed.ends_with("rem") {
-            if let Ok(num) = trimmed[..trimmed.len() - 3].trim().parse::<f64>() {
+        if let Some(rem_str) = trimmed.strip_suffix("rem") {
+            if let Ok(num) = rem_str.trim().parse::<f64>() {
                 return serde_json::json!(num * 16.0);
             }
         }
-        if trimmed.ends_with("px") {
-            if let Ok(num) = trimmed[..trimmed.len() - 2].trim().parse::<f64>() {
+        if let Some(px_str) = trimmed.strip_suffix("px") {
+            if let Ok(num) = px_str.trim().parse::<f64>() {
                 return serde_json::json!(num);
             }
         }
@@ -998,7 +1106,12 @@ impl StylesheetIndex {
     }
 
     pub fn expand_border(key: &str, val: &JsonValue) -> Option<Vec<(String, JsonValue)>> {
-        if key != "border" && key != "borderTop" && key != "borderBottom" && key != "borderLeft" && key != "borderRight" {
+        if key != "border"
+            && key != "borderTop"
+            && key != "borderBottom"
+            && key != "borderLeft"
+            && key != "borderRight"
+        {
             return None;
         }
 
@@ -1018,7 +1131,10 @@ impl StylesheetIndex {
                 if part == "solid" || part == "dashed" || part == "dotted" {
                     results.push(("borderStyle".to_string(), serde_json::json!(part)));
                     style_found = true;
-                } else if part.ends_with("px") || part.ends_with("rem") || part.parse::<f64>().is_ok() {
+                } else if part.ends_with("px")
+                    || part.ends_with("rem")
+                    || part.parse::<f64>().is_ok()
+                {
                     results.push((format!("{}Width", key), Self::parse_unit_val(part)));
                 } else {
                     // Color token
@@ -1049,7 +1165,10 @@ impl StylesheetIndex {
                 if let Some(s) = val.as_str() {
                     let parts: Vec<&str> = s.split_whitespace().collect();
                     if parts.len() == 1 {
-                        return Some(vec![("paddingHorizontal".to_string(), Self::parse_unit_val(parts[0]))]);
+                        return Some(vec![(
+                            "paddingHorizontal".to_string(),
+                            Self::parse_unit_val(parts[0]),
+                        )]);
                     } else if parts.len() >= 2 {
                         return Some(vec![
                             ("paddingStart".to_string(), Self::parse_unit_val(parts[0])),
@@ -1063,7 +1182,10 @@ impl StylesheetIndex {
                 if let Some(s) = val.as_str() {
                     let parts: Vec<&str> = s.split_whitespace().collect();
                     if parts.len() == 1 {
-                        return Some(vec![("marginHorizontal".to_string(), Self::parse_unit_val(parts[0]))]);
+                        return Some(vec![(
+                            "marginHorizontal".to_string(),
+                            Self::parse_unit_val(parts[0]),
+                        )]);
                     } else if parts.len() >= 2 {
                         return Some(vec![
                             ("marginStart".to_string(), Self::parse_unit_val(parts[0])),
@@ -1077,7 +1199,10 @@ impl StylesheetIndex {
                 if let Some(s) = val.as_str() {
                     let parts: Vec<&str> = s.split_whitespace().collect();
                     if parts.len() == 1 {
-                        return Some(vec![("paddingVertical".to_string(), Self::parse_unit_val(parts[0]))]);
+                        return Some(vec![(
+                            "paddingVertical".to_string(),
+                            Self::parse_unit_val(parts[0]),
+                        )]);
                     } else if parts.len() >= 2 {
                         return Some(vec![
                             ("paddingTop".to_string(), Self::parse_unit_val(parts[0])),
@@ -1091,7 +1216,10 @@ impl StylesheetIndex {
                 if let Some(s) = val.as_str() {
                     let parts: Vec<&str> = s.split_whitespace().collect();
                     if parts.len() == 1 {
-                        return Some(vec![("marginVertical".to_string(), Self::parse_unit_val(parts[0]))]);
+                        return Some(vec![(
+                            "marginVertical".to_string(),
+                            Self::parse_unit_val(parts[0]),
+                        )]);
                     } else if parts.len() >= 2 {
                         return Some(vec![
                             ("marginTop".to_string(), Self::parse_unit_val(parts[0])),
@@ -1117,7 +1245,10 @@ impl StylesheetIndex {
                         ]);
                     }
                 }
-                Some(vec![("left".to_string(), val.clone()), ("right".to_string(), val.clone())])
+                Some(vec![
+                    ("left".to_string(), val.clone()),
+                    ("right".to_string(), val.clone()),
+                ])
             }
             "insetBlock" => {
                 if let Some(s) = val.as_str() {
@@ -1135,7 +1266,10 @@ impl StylesheetIndex {
                         ]);
                     }
                 }
-                Some(vec![("top".to_string(), val.clone()), ("bottom".to_string(), val.clone())])
+                Some(vec![
+                    ("top".to_string(), val.clone()),
+                    ("bottom".to_string(), val.clone()),
+                ])
             }
             "paddingInlineStart" => Some(vec![("paddingStart".to_string(), val.clone())]),
             "paddingInlineEnd" => Some(vec![("paddingEnd".to_string(), val.clone())]),
@@ -1164,7 +1298,8 @@ impl StylesheetIndex {
                     let args = s[abs_open + 1..abs_close].trim();
 
                     match fn_name {
-                        "translateX" | "translateY" | "scale" | "scaleX" | "scaleY" | "rotate" | "rotateX" | "rotateY" | "rotateZ" | "skewX" | "skewY" | "perspective" => {
+                        "translateX" | "translateY" | "scale" | "scaleX" | "scaleY" | "rotate"
+                        | "rotateX" | "rotateY" | "rotateZ" | "skewX" | "skewY" | "perspective" => {
                             let parsed_arg = Self::parse_unit_val(args);
                             let mut map = serde_json::Map::new();
                             map.insert(fn_name.to_string(), parsed_arg);
@@ -1174,11 +1309,17 @@ impl StylesheetIndex {
                             let parts: Vec<&str> = args.split(',').map(|p| p.trim()).collect();
                             if !parts.is_empty() {
                                 let mut map_x = serde_json::Map::new();
-                                map_x.insert("translateX".to_string(), Self::parse_unit_val(parts[0]));
+                                map_x.insert(
+                                    "translateX".to_string(),
+                                    Self::parse_unit_val(parts[0]),
+                                );
                                 transforms.push(JsonValue::Object(map_x));
                                 if parts.len() > 1 {
                                     let mut map_y = serde_json::Map::new();
-                                    map_y.insert("translateY".to_string(), Self::parse_unit_val(parts[1]));
+                                    map_y.insert(
+                                        "translateY".to_string(),
+                                        Self::parse_unit_val(parts[1]),
+                                    );
                                     transforms.push(JsonValue::Object(map_y));
                                 }
                             }
@@ -1191,7 +1332,10 @@ impl StylesheetIndex {
                                 transforms.push(JsonValue::Object(map_x));
                                 if parts.len() > 1 {
                                     let mut map_y = serde_json::Map::new();
-                                    map_y.insert("skewY".to_string(), Self::parse_unit_val(parts[1]));
+                                    map_y.insert(
+                                        "skewY".to_string(),
+                                        Self::parse_unit_val(parts[1]),
+                                    );
                                     transforms.push(JsonValue::Object(map_y));
                                 }
                             }
@@ -1212,13 +1356,20 @@ impl StylesheetIndex {
         }
     }
 
-    pub fn insert_resolved_property(prop_map: &mut HashMap<String, JsonValue>, key: &str, val: JsonValue) {
+    pub fn insert_resolved_property(
+        prop_map: &mut HashMap<String, JsonValue>,
+        key: &str,
+        val: JsonValue,
+    ) {
         if val.is_null() {
             return;
         }
 
         if key == "scale" {
-            prop_map.insert("transform".to_string(), serde_json::json!([{ "scale": val }]));
+            prop_map.insert(
+                "transform".to_string(),
+                serde_json::json!([{ "scale": val }]),
+            );
             return;
         }
 
@@ -1226,7 +1377,11 @@ impl StylesheetIndex {
             if let Some(s) = val.as_str() {
                 let trimmed = s.trim();
                 let num = if trimmed.ends_with('%') {
-                    trimmed.trim_end_matches('%').parse::<f64>().map(|p| p / 100.0).ok()
+                    trimmed
+                        .trim_end_matches('%')
+                        .parse::<f64>()
+                        .map(|p| p / 100.0)
+                        .ok()
                 } else {
                     trimmed.parse::<f64>().ok()
                 };
@@ -1253,12 +1408,12 @@ impl StylesheetIndex {
                     prop_map.insert(key.to_string(), serde_json::json!(0.0));
                     return;
                 }
-                let num = if trimmed.ends_with("rem") {
-                    trimmed[..trimmed.len() - 3].trim().parse::<f64>().map(|n| n * 16.0).ok()
-                } else if trimmed.ends_with("em") {
-                    trimmed[..trimmed.len() - 2].trim().parse::<f64>().map(|n| n * 16.0).ok()
-                } else if trimmed.ends_with("px") {
-                    trimmed[..trimmed.len() - 2].trim().parse::<f64>().ok()
+                let num = if let Some(rem_str) = trimmed.strip_suffix("rem") {
+                    rem_str.trim().parse::<f64>().map(|n| n * 16.0).ok()
+                } else if let Some(em_str) = trimmed.strip_suffix("em") {
+                    em_str.trim().parse::<f64>().map(|n| n * 16.0).ok()
+                } else if let Some(px_str) = trimmed.strip_suffix("px") {
+                    px_str.trim().parse::<f64>().ok()
                 } else {
                     trimmed.parse::<f64>().ok()
                 };
@@ -1302,7 +1457,11 @@ impl StylesheetIndex {
 
         if key.ends_with("Style") || key.ends_with("borderStyle") || key == "borderStyle" {
             let s_val = val.as_str().unwrap_or("solid").to_string();
-            let valid_val = if s_val == "dotted" || s_val == "dashed" { s_val } else { "solid".to_string() };
+            let valid_val = if s_val == "dotted" || s_val == "dashed" {
+                s_val
+            } else {
+                "solid".to_string()
+            };
             prop_map.insert("borderStyle".to_string(), serde_json::json!(valid_val));
             return;
         }
@@ -1339,7 +1498,10 @@ impl StylesheetIndex {
         true
     }
 
-    pub fn compute_static_styles(&self, class_names_str: &str) -> Option<HashMap<String, JsonValue>> {
+    pub fn compute_static_styles(
+        &self,
+        class_names_str: &str,
+    ) -> Option<HashMap<String, JsonValue>> {
         let classes: Vec<&str> = class_names_str.split_whitespace().collect();
         if classes.is_empty() {
             return None;
@@ -1434,7 +1596,10 @@ fn json_value_to_expr(val: &JsonValue) -> Expr {
             let props = obj
                 .iter()
                 .map(|(k, v)| {
-                    let prop_name = if k.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+                    let prop_name = if k
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                    {
                         PropName::Ident(IdentName::new(k.clone().into(), DUMMY_SP))
                     } else {
                         PropName::Str(Str {
@@ -1481,7 +1646,10 @@ impl StyleSheetCollector {
     pub fn to_member_expr(&self, id: &str) -> Expr {
         Expr::Member(MemberExpr {
             span: DUMMY_SP,
-            obj: Box::new(Expr::Ident(Ident::new_no_ctxt("_rnStyles".into(), DUMMY_SP))),
+            obj: Box::new(Expr::Ident(Ident::new_no_ctxt(
+                "_rnStyles".into(),
+                DUMMY_SP,
+            ))),
             prop: MemberProp::Ident(IdentName::new(id.into(), DUMMY_SP)),
         })
     }
@@ -1502,6 +1670,16 @@ impl StyleSheetCollector {
     }
 }
 
+/// Style expressions produced when resolving a `className` string
+/// (see `CssTransformerVisitor::resolve_class_string`).
+type ResolvedClassExprs = (
+    Option<Expr>,
+    Option<Expr>,
+    Option<Expr>,
+    Option<Expr>,
+    Option<Expr>,
+);
+
 /// AST Visitor that transforms JSX elements
 struct CssTransformerVisitor<'a> {
     stylesheet: &'a StylesheetIndex,
@@ -1517,7 +1695,7 @@ impl<'a> CssTransformerVisitor<'a> {
         &mut self,
         class_str: &str,
         disabled_prop_expr: Option<&Expr>,
-    ) -> Option<(Option<Expr>, Option<Expr>, Option<Expr>, Option<Expr>, Option<Expr>)> {
+    ) -> Option<ResolvedClassExprs> {
         let classes: Vec<&str> = class_str.split_whitespace().collect();
         if classes.is_empty() {
             return None;
@@ -1532,13 +1710,23 @@ impl<'a> CssTransformerVisitor<'a> {
         for cls in classes {
             if cls == "group" || cls.starts_with("group/") {
                 continue;
-            } else if let Some(rest) = cls.strip_prefix("active:").or_else(|| cls.strip_prefix("pressed:")) {
+            } else if let Some(rest) = cls
+                .strip_prefix("active:")
+                .or_else(|| cls.strip_prefix("pressed:"))
+            {
                 active_classes.push(rest);
-            } else if let Some(rest) = cls.strip_prefix("group-active:").or_else(|| cls.strip_prefix("group-pressed:")) {
+            } else if let Some(rest) = cls
+                .strip_prefix("group-active:")
+                .or_else(|| cls.strip_prefix("group-pressed:"))
+            {
                 group_active_classes.push(rest);
             } else if let Some(rest) = cls.strip_prefix("disabled:") {
                 disabled_classes.push(rest);
-            } else if cls.starts_with("transition") || cls.starts_with("duration-") || cls.starts_with("ease-") || cls.starts_with("delay-") {
+            } else if cls.starts_with("transition")
+                || cls.starts_with("duration-")
+                || cls.starts_with("ease-")
+                || cls.starts_with("delay-")
+            {
                 transition_classes.push(cls);
                 normal_classes.push(cls);
             } else if cls.starts_with("sm:")
@@ -1567,41 +1755,61 @@ impl<'a> CssTransformerVisitor<'a> {
         }
 
         let normal_expr = if !normal_classes.is_empty() {
-            let map = self.stylesheet.compute_static_styles(&normal_classes.join(" "))?;
-            let id = self.collector.get_or_insert(JsonValue::Object(map.into_iter().collect()));
+            let map = self
+                .stylesheet
+                .compute_static_styles(&normal_classes.join(" "))?;
+            let id = self
+                .collector
+                .get_or_insert(JsonValue::Object(map.into_iter().collect()));
             Some(self.collector.to_member_expr(&id))
         } else {
             None
         };
 
         let active_expr = if !active_classes.is_empty() {
-            let map = self.stylesheet.compute_static_styles(&active_classes.join(" "))?;
-            let id = self.collector.get_or_insert(JsonValue::Object(map.into_iter().collect()));
+            let map = self
+                .stylesheet
+                .compute_static_styles(&active_classes.join(" "))?;
+            let id = self
+                .collector
+                .get_or_insert(JsonValue::Object(map.into_iter().collect()));
             Some(self.collector.to_member_expr(&id))
         } else {
             None
         };
 
         let group_active_expr = if !group_active_classes.is_empty() {
-            let map = self.stylesheet.compute_static_styles(&group_active_classes.join(" "))?;
-            let id = self.collector.get_or_insert(JsonValue::Object(map.into_iter().collect()));
+            let map = self
+                .stylesheet
+                .compute_static_styles(&group_active_classes.join(" "))?;
+            let id = self
+                .collector
+                .get_or_insert(JsonValue::Object(map.into_iter().collect()));
             Some(self.collector.to_member_expr(&id))
         } else {
             None
         };
 
         let disabled_expr = if !disabled_classes.is_empty() {
-            let map = self.stylesheet.compute_static_styles(&disabled_classes.join(" "))?;
-            let id = self.collector.get_or_insert(JsonValue::Object(map.into_iter().collect()));
+            let map = self
+                .stylesheet
+                .compute_static_styles(&disabled_classes.join(" "))?;
+            let id = self
+                .collector
+                .get_or_insert(JsonValue::Object(map.into_iter().collect()));
             Some(self.collector.to_member_expr(&id))
         } else {
             None
         };
 
         let transition_expr = if !transition_classes.is_empty() {
-            let map = self.stylesheet.compute_static_styles(&transition_classes.join(" "));
+            let map = self
+                .stylesheet
+                .compute_static_styles(&transition_classes.join(" "));
             if let Some(trans_map) = map {
-                let id = self.collector.get_or_insert(JsonValue::Object(trans_map.into_iter().collect()));
+                let id = self
+                    .collector
+                    .get_or_insert(JsonValue::Object(trans_map.into_iter().collect()));
                 Some(self.collector.to_member_expr(&id))
             } else {
                 None
@@ -1610,35 +1818,54 @@ impl<'a> CssTransformerVisitor<'a> {
             None
         };
 
-        if normal_expr.is_none() && active_expr.is_none() && group_active_expr.is_none() && disabled_expr.is_none() {
+        if normal_expr.is_none()
+            && active_expr.is_none()
+            && group_active_expr.is_none()
+            && disabled_expr.is_none()
+        {
             return None;
         }
 
-        Some((normal_expr, active_expr, group_active_expr, disabled_expr, transition_expr))
+        Some((
+            normal_expr,
+            active_expr,
+            group_active_expr,
+            disabled_expr,
+            transition_expr,
+        ))
     }
 
     /// Recursively resolve dynamic branches (nested ternaries, binary ANDs, parens, string literals)
-    fn transform_dynamic_branch(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>) -> Option<Expr> {
+    fn transform_dynamic_branch(
+        &mut self,
+        expr: &Expr,
+        disabled_prop_expr: Option<&Expr>,
+    ) -> Option<Expr> {
         match expr {
             // String literal: "bg-blue-500 border-green-500"
             Expr::Lit(Lit::Str(s)) => {
                 let s_str = s.value.as_str()?;
                 if s_str.trim().is_empty() {
-                    return Some(Expr::Ident(Ident::new_no_ctxt("undefined".into(), DUMMY_SP)));
+                    return Some(Expr::Ident(Ident::new_no_ctxt(
+                        "undefined".into(),
+                        DUMMY_SP,
+                    )));
                 }
                 let (normal, _, _, _, _) = self.resolve_class_string(s_str, disabled_prop_expr)?;
                 normal
             }
 
             // Literal null -> undefined for RN style
-            Expr::Lit(Lit::Null(_)) => {
-                Some(Expr::Ident(Ident::new_no_ctxt("undefined".into(), DUMMY_SP)))
-            }
+            Expr::Lit(Lit::Null(_)) => Some(Expr::Ident(Ident::new_no_ctxt(
+                "undefined".into(),
+                DUMMY_SP,
+            ))),
 
             // Literal false -> undefined for RN style
-            Expr::Lit(Lit::Bool(b)) if !b.value => {
-                Some(Expr::Ident(Ident::new_no_ctxt("undefined".into(), DUMMY_SP)))
-            }
+            Expr::Lit(Lit::Bool(b)) if !b.value => Some(Expr::Ident(Ident::new_no_ctxt(
+                "undefined".into(),
+                DUMMY_SP,
+            ))),
 
             // Parenthesized expression: (a ? "bg-1" : "bg-2")
             Expr::Paren(p) => {
@@ -1678,20 +1905,28 @@ impl<'a> CssTransformerVisitor<'a> {
             }
 
             // Only pass through `undefined` literal identifier, not arbitrary identifiers (which hold class strings!)
-            Expr::Ident(ident) if ident.sym.as_str() == "undefined" => Some(Expr::Ident(ident.clone())),
+            Expr::Ident(ident) if ident.sym.as_str() == "undefined" => {
+                Some(Expr::Ident(ident.clone()))
+            }
 
             _ => None,
         }
     }
 
     /// Try resolving an AST expression (literal, template literal, or ternary) into a style Expr
-    fn transform_class_expr(&mut self, expr: &Expr, disabled_prop_expr: Option<&Expr>, is_pressable: bool) -> Option<Expr> {
+    fn transform_class_expr(
+        &mut self,
+        expr: &Expr,
+        disabled_prop_expr: Option<&Expr>,
+        is_pressable: bool,
+    ) -> Option<Expr> {
         let snapshot = self.collector.snapshot();
         let res = match expr {
             // 1. String literal: "p-4 bg-primary"
             Expr::Lit(Lit::Str(s)) => {
                 let s_str = s.value.as_str()?;
-                let (normal_expr, active_expr, group_active_expr, disabled_expr, _transition_expr) = self.resolve_class_string(s_str, disabled_prop_expr)?;
+                let (normal_expr, active_expr, group_active_expr, disabled_expr, _transition_expr) =
+                    self.resolve_class_string(s_str, disabled_prop_expr)?;
                 self.build_combined_style_expr(
                     normal_expr.into_iter().collect(),
                     active_expr,
@@ -1707,7 +1942,9 @@ impl<'a> CssTransformerVisitor<'a> {
                 let mut dynamic_exprs: Vec<Expr> = Vec::new();
 
                 for dynamic_part in &tpl.exprs {
-                    if let Some(dyn_expr) = self.transform_dynamic_branch(dynamic_part, disabled_prop_expr) {
+                    if let Some(dyn_expr) =
+                        self.transform_dynamic_branch(dynamic_part, disabled_prop_expr)
+                    {
                         dynamic_exprs.push(dyn_expr);
                     } else {
                         // If any interpolation part cannot be resolved statically (e.g. function call, variable),
@@ -1730,7 +1967,11 @@ impl<'a> CssTransformerVisitor<'a> {
                     dynamic_exprs.insert(0, bn);
                 }
 
-                if dynamic_exprs.is_empty() && base_active.is_none() && base_group_active.is_none() && base_disabled.is_none() {
+                if dynamic_exprs.is_empty()
+                    && base_active.is_none()
+                    && base_group_active.is_none()
+                    && base_disabled.is_none()
+                {
                     return None;
                 }
 
@@ -1784,7 +2025,12 @@ impl<'a> CssTransformerVisitor<'a> {
                 span: DUMMY_SP,
                 elems: normal_exprs
                     .into_iter()
-                    .map(|e| Some(ExprOrSpread { spread: None, expr: Box::new(e) }))
+                    .map(|e| {
+                        Some(ExprOrSpread {
+                            spread: None,
+                            expr: Box::new(e),
+                        })
+                    })
                     .collect(),
             })
         } else {
@@ -1870,7 +2116,9 @@ impl<'a> CssTransformerVisitor<'a> {
             Some(Expr::Arrow(ArrowExpr {
                 span: DUMMY_SP,
                 params: vec![pressed_param],
-                body: Box::new(swc_core::ecma::ast::ArrowFunctionBody::Expr(Box::new(array_body))),
+                body: Box::new(swc_core::ecma::ast::ArrowFunctionBody::Expr(Box::new(
+                    array_body,
+                ))),
                 is_async: false,
                 is_generator: false,
                 type_params: None,
@@ -1962,7 +2210,14 @@ impl<'a> VisitMut for CssTransformerVisitor<'a> {
                     if let JSXAttrName::Ident(ident) = &jsx_attr.name {
                         if ident.sym.as_str() == "className" {
                             if let Some(JSXAttrValue::Str(s)) = &jsx_attr.value {
-                                if s.value.as_str().map(|v| v.split_whitespace().any(|c| c == "group" || c.starts_with("group/"))).unwrap_or(false) {
+                                if s.value
+                                    .as_str()
+                                    .map(|v| {
+                                        v.split_whitespace()
+                                            .any(|c| c == "group" || c.starts_with("group/"))
+                                    })
+                                    .unwrap_or(false)
+                                {
                                     is_group_pressable = true;
                                 }
                             }
@@ -1985,13 +2240,14 @@ impl<'a> VisitMut for CssTransformerVisitor<'a> {
             self.group_active_used = prev_group_active || children_used_group_active;
 
             if children_used_group_active && !el.children.is_empty() {
-                let already_function = el.children.len() == 1 && match &el.children[0] {
-                    JSXElementChild::JSXExprContainer(c) => match &c.expr {
-                        JSXExpr::Expr(e) => matches!(**e, Expr::Arrow(_) | Expr::Fn(_)),
+                let already_function = el.children.len() == 1
+                    && match &el.children[0] {
+                        JSXElementChild::JSXExprContainer(c) => match &c.expr {
+                            JSXExpr::Expr(e) => matches!(**e, Expr::Arrow(_) | Expr::Fn(_)),
+                            _ => false,
+                        },
                         _ => false,
-                    },
-                    _ => false,
-                };
+                    };
 
                 if !already_function {
                     let pressed_ident = Ident::new_no_ctxt("pressed".into(), DUMMY_SP);
@@ -2060,7 +2316,10 @@ impl<'a> VisitMut for CssTransformerVisitor<'a> {
                                 disabled_prop_expr = Some((**e).clone());
                             }
                         } else if jsx_attr.value.is_none() {
-                            disabled_prop_expr = Some(Expr::Lit(Lit::Bool(Bool { span: DUMMY_SP, value: true })));
+                            disabled_prop_expr = Some(Expr::Lit(Lit::Bool(Bool {
+                                span: DUMMY_SP,
+                                value: true,
+                            })));
                         }
                     }
                 }
@@ -2086,11 +2345,19 @@ impl<'a> VisitMut for CssTransformerVisitor<'a> {
                                 match val {
                                     JSXAttrValue::Str(s) => {
                                         let lit_expr = Expr::Lit(Lit::Str(s.clone()));
-                                        resolved_style_expr = self.transform_class_expr(&lit_expr, disabled_prop_expr.as_ref(), is_pressable);
+                                        resolved_style_expr = self.transform_class_expr(
+                                            &lit_expr,
+                                            disabled_prop_expr.as_ref(),
+                                            is_pressable,
+                                        );
                                     }
                                     JSXAttrValue::JSXExprContainer(c) => {
                                         if let JSXExpr::Expr(e) = &c.expr {
-                                            resolved_style_expr = self.transform_class_expr(e, disabled_prop_expr.as_ref(), is_pressable);
+                                            resolved_style_expr = self.transform_class_expr(
+                                                e,
+                                                disabled_prop_expr.as_ref(),
+                                                is_pressable,
+                                            );
                                         }
                                     }
                                     _ => {}
@@ -2123,7 +2390,9 @@ impl<'a> VisitMut for CssTransformerVisitor<'a> {
                         let old_expr = match &jsx_attr.value {
                             Some(JSXAttrValue::JSXExprContainer(c)) => match &c.expr {
                                 JSXExpr::Expr(e) => (**e).clone(),
-                                _ => Expr::Lit(Lit::Null(swc_core::ecma::ast::Null { span: DUMMY_SP })),
+                                _ => Expr::Lit(Lit::Null(swc_core::ecma::ast::Null {
+                                    span: DUMMY_SP,
+                                })),
                             },
                             _ => Expr::Lit(Lit::Null(swc_core::ecma::ast::Null { span: DUMMY_SP })),
                         };
@@ -2174,10 +2443,7 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
         .and_then(|o| o.filename.clone())
         .unwrap_or_else(|| "input.tsx".to_string());
 
-    let enable_source_map = options
-        .as_ref()
-        .and_then(|o| o.source_maps)
-        .unwrap_or(true);
+    let enable_source_map = options.as_ref().and_then(|o| o.source_maps).unwrap_or(true);
 
     let fm = cm.new_source_file(Lrc::new(FileName::Real(filename.clone().into())), code);
 
@@ -2200,14 +2466,15 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
     })?;
 
     // Load stylesheet index
-    let stylesheet_index = if let Some(json_str) = options.as_ref().and_then(|o| o.stylesheet_json.as_deref()) {
-        StylesheetIndex::from_json_str(json_str)
-    } else if let Some(raw_css) = options.as_ref().and_then(|o| o.raw_css.as_deref()) {
-        let compiled = css::compile_css_to_json(raw_css);
-        StylesheetIndex::from_json_val(compiled)
-    } else {
-        StylesheetIndex::from_json_str("{}")
-    };
+    let stylesheet_index =
+        if let Some(json_str) = options.as_ref().and_then(|o| o.stylesheet_json.as_deref()) {
+            StylesheetIndex::from_json_str(json_str)
+        } else if let Some(raw_css) = options.as_ref().and_then(|o| o.raw_css.as_deref()) {
+            let compiled = css::compile_css_to_json(raw_css);
+            StylesheetIndex::from_json_val(compiled)
+        } else {
+            StylesheetIndex::from_json_str("{}")
+        };
 
     let mut collector = StyleSheetCollector::default();
 
@@ -2240,12 +2507,18 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
             declare: false,
             decls: vec![VarDeclarator {
                 span: DUMMY_SP,
-                name: Pat::Ident(BindingIdent::from(Ident::new_no_ctxt("_rnStyles".into(), DUMMY_SP))),
+                name: Pat::Ident(BindingIdent::from(Ident::new_no_ctxt(
+                    "_rnStyles".into(),
+                    DUMMY_SP,
+                ))),
                 init: Some(Box::new(Expr::Call(CallExpr {
                     span: DUMMY_SP,
                     callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
                         span: DUMMY_SP,
-                        obj: Box::new(Expr::Ident(Ident::new_no_ctxt("StyleSheet".into(), DUMMY_SP))),
+                        obj: Box::new(Expr::Ident(Ident::new_no_ctxt(
+                            "StyleSheet".into(),
+                            DUMMY_SP,
+                        ))),
                         prop: MemberProp::Ident(IdentName::new("create".into(), DUMMY_SP)),
                     }))),
                     args: vec![ExprOrSpread {
@@ -2306,12 +2579,14 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
                         }
                     }
                     if !has_stylesheet_specifier {
-                        import_decl.specifiers.push(ImportSpecifier::Named(ImportNamedSpecifier {
-                            span: DUMMY_SP,
-                            local: Ident::new_no_ctxt("StyleSheet".into(), DUMMY_SP),
-                            imported: None,
-                            is_type_only: false,
-                        }));
+                        import_decl
+                            .specifiers
+                            .push(ImportSpecifier::Named(ImportNamedSpecifier {
+                                span: DUMMY_SP,
+                                local: Ident::new_no_ctxt("StyleSheet".into(), DUMMY_SP),
+                                imported: None,
+                                is_type_only: false,
+                            }));
                         has_stylesheet_specifier = true;
                     }
                 }
@@ -2405,7 +2680,10 @@ pub fn transform_jsx(code: String, options: Option<TransformOptions>) -> Result<
 pub fn compile_css(css: String) -> Result<String> {
     let json_val = css::compile_css_to_json(&css);
     serde_json::to_string(&json_val).map_err(|e| {
-        Error::new(Status::GenericFailure, format!("Serialization error: {}", e))
+        Error::new(
+            Status::GenericFailure,
+            format!("Serialization error: {}", e),
+        )
     })
 }
 
@@ -2422,40 +2700,23 @@ pub fn resolve_runtime_styles(
 
     let width = options.as_ref().and_then(|o| o.width).unwrap_or(375.0);
     let _height = options.as_ref().and_then(|o| o.height).unwrap_or(812.0);
-    let color_scheme = options.as_ref().and_then(|o| o.color_scheme.as_deref()).unwrap_or("light");
-    let current_platform = options.as_ref().and_then(|o| o.platform.as_deref()).unwrap_or("ios");
+    let color_scheme = options
+        .as_ref()
+        .and_then(|o| o.color_scheme.as_deref())
+        .unwrap_or("light");
+    let current_platform = options
+        .as_ref()
+        .and_then(|o| o.platform.as_deref())
+        .unwrap_or("ios");
 
     for cls in classes {
         // Platform variants: ios:, android:, web:
-        if cls.starts_with("ios:") {
-            if current_platform == "ios" {
-                if let Some(props) = index.get_class_style(&cls[4..]) {
-                    for (k, v) in props { merged.insert(k, v); }
-                }
-            }
-            continue;
-        }
-        if cls.starts_with("android:") {
-            if current_platform == "android" {
-                if let Some(props) = index.get_class_style(&cls[8..]) {
-                    for (k, v) in props { merged.insert(k, v); }
-                }
-            }
-            continue;
-        }
-        if cls.starts_with("web:") {
-            if current_platform == "web" {
-                if let Some(props) = index.get_class_style(&cls[4..]) {
-                    for (k, v) in props { merged.insert(k, v); }
-                }
-            }
-            continue;
-        }
-
-        // Handle media query / dark mode prefix
-        if cls.starts_with("dark:") {
-            if color_scheme == "dark" {
-                let base = &cls[5..];
+        if let Some((platform, base)) = ["ios", "android", "web"].iter().find_map(|p| {
+            cls.strip_prefix(p)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .map(|rest| (*p, rest))
+        }) {
+            if current_platform == platform {
                 if let Some(props) = index.get_class_style(base) {
                     for (k, v) in props {
                         merged.insert(k, v);
@@ -2465,9 +2726,20 @@ pub fn resolve_runtime_styles(
             continue;
         }
 
-        if cls.starts_with("light:") {
+        // Handle media query / dark mode prefix
+        if let Some(base) = cls.strip_prefix("dark:") {
+            if color_scheme == "dark" {
+                if let Some(props) = index.get_class_style(base) {
+                    for (k, v) in props {
+                        merged.insert(k, v);
+                    }
+                }
+            }
+            continue;
+        }
+
+        if let Some(base) = cls.strip_prefix("light:") {
             if color_scheme == "light" {
-                let base = &cls[6..];
                 if let Some(props) = index.get_class_style(base) {
                     for (k, v) in props {
                         merged.insert(k, v);
@@ -2478,42 +2750,22 @@ pub fn resolve_runtime_styles(
         }
 
         // Responsive breakpoints: sm (640), md (768), lg (1024), xl (1280), 2xl (1536)
-        if cls.starts_with("sm:") {
-            if width >= 640.0 {
-                if let Some(props) = index.get_class_style(&cls[3..]) {
-                    for (k, v) in props { merged.insert(k, v); }
-                }
-            }
-            continue;
-        }
-        if cls.starts_with("md:") {
-            if width >= 768.0 {
-                if let Some(props) = index.get_class_style(&cls[3..]) {
-                    for (k, v) in props { merged.insert(k, v); }
-                }
-            }
-            continue;
-        }
-        if cls.starts_with("lg:") {
-            if width >= 1024.0 {
-                if let Some(props) = index.get_class_style(&cls[3..]) {
-                    for (k, v) in props { merged.insert(k, v); }
-                }
-            }
-            continue;
-        }
-        if cls.starts_with("xl:") {
-            if width >= 1280.0 {
-                if let Some(props) = index.get_class_style(&cls[3..]) {
-                    for (k, v) in props { merged.insert(k, v); }
-                }
-            }
-            continue;
-        }
-        if cls.starts_with("2xl:") {
-            if width >= 1536.0 {
-                if let Some(props) = index.get_class_style(&cls[4..]) {
-                    for (k, v) in props { merged.insert(k, v); }
+        const BREAKPOINTS: [(&str, f64); 5] = [
+            ("sm:", 640.0),
+            ("md:", 768.0),
+            ("lg:", 1024.0),
+            ("xl:", 1280.0),
+            ("2xl:", 1536.0),
+        ];
+        if let Some((min_width, base)) = BREAKPOINTS
+            .iter()
+            .find_map(|(prefix, min)| cls.strip_prefix(prefix).map(|rest| (*min, rest)))
+        {
+            if width >= min_width {
+                if let Some(props) = index.get_class_style(base) {
+                    for (k, v) in props {
+                        merged.insert(k, v);
+                    }
                 }
             }
             continue;
@@ -2564,7 +2816,10 @@ pub fn resolve_runtime_styles(
     }
 
     serde_json::to_string(&merged).map_err(|e| {
-        Error::new(Status::GenericFailure, format!("Serialization error: {}", e))
+        Error::new(
+            Status::GenericFailure,
+            format!("Serialization error: {}", e),
+        )
     })
 }
 
@@ -2581,24 +2836,32 @@ mod tests {
             export function Box() {
                 return <View className="p-4" />;
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "p-4": { "_static": { "padding": 16 } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Box.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: None,
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Box.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: None,
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         // The type-only declaration must be left alone ...
         assert!(!res.code.contains("import type { ViewStyle, StyleSheet }"));
         // ... and a real value import must be emitted for the runtime binding.
-        assert!(res.code.contains("import { StyleSheet } from \"react-native\""));
+        assert!(res
+            .code
+            .contains("import { StyleSheet } from \"react-native\""));
     }
 
     #[test]
@@ -2609,18 +2872,24 @@ mod tests {
             export function Box() {
                 return <View className="p-4" />;
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "p-4": { "_static": { "padding": 16 } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Box.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: None,
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Box.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: None,
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(!res.code.contains("type StyleSheet"));
@@ -2635,21 +2904,29 @@ mod tests {
             export function Box() {
                 return <View className="p-4" />;
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "p-4": { "_static": { "padding": 16 } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Box.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: None,
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Box.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: None,
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
-        assert!(res.code.contains("import { StyleSheet } from \"react-native\""));
+        assert!(res
+            .code
+            .contains("import { StyleSheet } from \"react-native\""));
         assert!(res.code.contains("import * as RN from \"react-native\""));
     }
 
@@ -2660,18 +2937,24 @@ mod tests {
             export function Box() {
                 return <View className="p-4" />;
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "p-4": { "_static": { "padding": 16 } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Box.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: None,
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Box.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: None,
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert_eq!(res.code.matches("from \"react-native\"").count(), 1);
@@ -2684,7 +2967,8 @@ mod tests {
             export function Box() {
                 return <View className="p-4 bg-primary" />;
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             ":root": {
@@ -2692,14 +2976,19 @@ mod tests {
             },
             "p-4": { "_static": { "padding": 16 } },
             "bg-primary": { "_dynamic": { "backgroundColor": "var(--color-primary)" } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Box.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(true),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Box.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(true),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles"));
@@ -2723,12 +3012,16 @@ mod tests {
 
         let index = StylesheetIndex::from_json_str(&sheet_json);
         let base_style = index.get_class_style("bg-base").unwrap();
-        assert!(base_style.get("backgroundColor").is_some());
+        assert!(base_style.contains_key("backgroundColor"));
 
         let accent_style = index.get_class_style("bg-accent").unwrap();
-        assert!(accent_style.get("backgroundColor").is_some());
+        assert!(accent_style.contains_key("backgroundColor"));
 
-        let accent_color = accent_style.get("backgroundColor").unwrap().as_str().unwrap();
+        let accent_color = accent_style
+            .get("backgroundColor")
+            .unwrap()
+            .as_str()
+            .unwrap();
         assert!(accent_color.starts_with("#"));
     }
 
@@ -2739,7 +3032,8 @@ mod tests {
             "text-lg": { "_static": { "fontSize": 18 } },
             "bg-light": { "_static": { "backgroundColor": "#ffffff" } },
             "bg-dark": { "_static": { "backgroundColor": "#000000" } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
         let dark_res = resolve_runtime_styles(
             sheet_json.clone(),
@@ -2750,7 +3044,8 @@ mod tests {
                 color_scheme: Some("dark".to_string()),
                 platform: Some("ios".to_string()),
             }),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(dark_res.contains("fontSize\":18"));
         assert!(dark_res.contains("backgroundColor\":\"#000000\""));
@@ -2759,7 +3054,8 @@ mod tests {
         let platform_sheet = r##"{
             "p-4": { "_static": { "padding": 16.0 } },
             "p-6": { "_static": { "padding": 24.0 } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
         let ios_res = resolve_runtime_styles(
             platform_sheet.clone(),
@@ -2770,7 +3066,8 @@ mod tests {
                 color_scheme: Some("light".to_string()),
                 platform: Some("ios".to_string()),
             }),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(ios_res.contains("16.0"));
 
         let android_res = resolve_runtime_styles(
@@ -2782,7 +3079,8 @@ mod tests {
                 color_scheme: Some("light".to_string()),
                 platform: Some("android".to_string()),
             }),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(android_res.contains("24.0"));
     }
 
@@ -2797,7 +3095,8 @@ mod tests {
                     </Pressable>
                 );
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             ":root": {
@@ -2806,14 +3105,19 @@ mod tests {
             "bg-primary": { "_dynamic": { "backgroundColor": "var(--color-primary)" } },
             "opacity-80": { "_static": { "opacity": 0.8 } },
             "scale-95": { "_static": { "transform": [{ "scale": 0.95 }] } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Button.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Button.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles"));
@@ -2844,14 +3148,19 @@ mod tests {
             "items-center": { "_static": { "alignItems": "center" } },
             "bg-primary": { "_dynamic": { "backgroundColor": "var(--color-primary)" } },
             "bg-black": { "_static": { "backgroundColor": "#000000" } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Key.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Key.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles"));
@@ -2867,19 +3176,25 @@ mod tests {
                     <View className={`absolute bottom-2 ${getPositionStyle()}`}>{versionText}</View>
                 );
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "absolute": { "_static": { "position": "absolute" } },
             "bottom-2": { "_static": { "bottom": 8 } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Footer.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Footer.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         // Must NOT strip className or drop getPositionStyle()!
         assert!(res.code.contains("getPositionStyle()"));
@@ -2899,18 +3214,24 @@ mod tests {
                     </>
                 );
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "bg-primary": { "_static": { "backgroundColor": "#53c2bc" } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Button.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Button.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("isActive ? _rnStyles._s0 : undefined"));
         assert!(res.code.contains("isSelected ? _rnStyles._s0 : undefined"));
@@ -2919,7 +3240,10 @@ mod tests {
     #[test]
     fn test_eval_simple_math_parentheses() {
         assert_eq!(StylesheetIndex::eval_simple_math("10 + 20 * 2"), Some(50.0));
-        assert_eq!(StylesheetIndex::eval_simple_math("(10 + 20) * 2"), Some(60.0));
+        assert_eq!(
+            StylesheetIndex::eval_simple_math("(10 + 20) * 2"),
+            Some(60.0)
+        );
         assert_eq!(StylesheetIndex::eval_simple_math("1rem + 8px"), Some(24.0));
     }
 
@@ -2948,14 +3272,19 @@ mod tests {
             "opacity-80": { "_static": { "opacity": 0.8 } },
             "opacity-40": { "_static": { "opacity": 0.4 } },
             "disabled:bg-navy-300": { "_dynamic": { "backgroundColor": "var(--color-navy-300)" } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Button.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Button.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("isDisabled"));
@@ -2973,7 +3302,8 @@ mod tests {
                     </Pressable>
                 );
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "p-4": { "_static": { "padding": 16 } },
@@ -2981,14 +3311,19 @@ mod tests {
             "rounded-full": { "_static": { "borderRadius": 9999 } },
             "bg-blue-500": { "_static": { "backgroundColor": "#3b82f6" } },
             "group-active:bg-yellow-500": { "_static": { "backgroundColor": "#eab308" } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Card.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Card.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles._s0"));
@@ -3004,7 +3339,8 @@ mod tests {
                     <View className="custom-box" />
                 );
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "custom-box": {
@@ -3016,14 +3352,19 @@ mod tests {
                     "transform": "translateX(10px) rotate(45deg)"
                 }
             }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Box.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Box.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("paddingTop: 16"));
@@ -3056,7 +3397,8 @@ mod tests {
                     />
                 );
             }
-        "##.to_string();
+        "##
+        .to_string();
 
         let sheet_json = r##"{
             "p-4": { "_static": { "padding": 16 } },
@@ -3068,14 +3410,19 @@ mod tests {
             "bg-green-500": { "_static": { "backgroundColor": "#22c55e" } },
             "border-orange-500": { "_static": { "borderColor": "#f97316" } },
             "bg-orange-500": { "_static": { "backgroundColor": "#f97316" } }
-        }"##.to_string();
+        }"##
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("ThemedCard.tsx".to_string()),
-            stylesheet_json: Some(sheet_json),
-            raw_css: None,
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("ThemedCard.tsx".to_string()),
+                stylesheet_json: Some(sheet_json),
+                raw_css: None,
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("variant === \"primary\""));
         assert!(res.code.contains("variant === \"secondary\""));
@@ -3153,7 +3500,10 @@ mod tests {
         assert_eq!(parsed["flex-row"]["flexDirection"].as_str(), Some("row"));
 
         // Check .p-4 contains dynamic var/calc
-        assert!(parsed["p-4"]["_dynamic"]["padding"].as_str().unwrap().contains("var(--spacing)"));
+        assert!(parsed["p-4"]["_dynamic"]["padding"]
+            .as_str()
+            .unwrap()
+            .contains("var(--spacing)"));
 
         // Check .custom-border shorthand expanded
         let border_decl = &parsed["custom-border"];
@@ -3191,7 +3541,8 @@ mod tests {
             export function Widget() {
                 return <View className="p-4 flex-row" />;
             }
-        "#.to_string();
+        "#
+        .to_string();
 
         let raw_css = r#"
             :root {
@@ -3203,14 +3554,19 @@ mod tests {
             .flex-row {
                 flex-direction: row;
             }
-        "#.to_string();
+        "#
+        .to_string();
 
-        let res = transform_jsx(code, Some(TransformOptions {
-            filename: Some("Widget.tsx".to_string()),
-            stylesheet_json: None,
-            raw_css: Some(raw_css),
-            source_maps: Some(false),
-        })).unwrap();
+        let res = transform_jsx(
+            code,
+            Some(TransformOptions {
+                filename: Some("Widget.tsx".to_string()),
+                stylesheet_json: None,
+                raw_css: Some(raw_css),
+                source_maps: Some(false),
+            }),
+        )
+        .unwrap();
 
         assert!(res.code.contains("StyleSheet.create"));
         assert!(res.code.contains("_rnStyles"));
@@ -3223,7 +3579,8 @@ mod tests {
         let sheet_json = r##"{
             "px-3": { "_dynamic": { "paddingInline": "12px" }, "_static": {} },
             "py-2": { "_dynamic": { "paddingBlock": "8px" }, "_static": {} }
-        }"##.to_string();
+        }"##
+        .to_string();
 
         let resolved = resolve_runtime_styles(sheet_json, "px-3 py-2".to_string(), None).unwrap();
         let map: serde_json::Value = serde_json::from_str(&resolved).unwrap();
