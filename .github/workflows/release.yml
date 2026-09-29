@@ -112,12 +112,15 @@ jobs:
           path: crates/transformer/
           merge-multiple: true
 
-      - name: Inspect downloaded binaries
+      # Only per-platform binaries are published. The generic `transformer.node`
+      # fallback is intentionally NOT shipped: it would be a single-arch binary
+      # that fails to load on every other platform.
+      - name: Verify downloaded binaries
         run: |
-          ls -la crates/transformer/*.node || true
-          if [ -f crates/transformer/transformer.linux-x64-gnu.node ] && [ ! -f crates/transformer/transformer.node ]; then
-            cp crates/transformer/transformer.linux-x64-gnu.node crates/transformer/transformer.node
-          fi
+          ls -la crates/transformer/*.node
+          for f in darwin-arm64 darwin-x64 linux-x64-gnu win32-x64-msvc; do
+            test -f "crates/transformer/transformer.$f.node" || { echo "Missing transformer.$f.node"; exit 1; }
+          done
 
       - name: Enable Corepack & Install
         run: |
