@@ -1942,15 +1942,11 @@ impl<'a> CssTransformerVisitor<'a> {
                 let mut dynamic_exprs: Vec<Expr> = Vec::new();
 
                 for dynamic_part in &tpl.exprs {
-                    if let Some(dyn_expr) =
-                        self.transform_dynamic_branch(dynamic_part, disabled_prop_expr)
-                    {
-                        dynamic_exprs.push(dyn_expr);
-                    } else {
-                        // If any interpolation part cannot be resolved statically (e.g. function call, variable),
-                        // do not discard it! Bail out so runtime cssInterop handles the className.
-                        return None;
-                    }
+                    // If any interpolation part cannot be resolved statically (e.g. function call, variable),
+                    // do not discard it! Bail out so runtime cssInterop handles the className.
+                    let dyn_expr =
+                        self.transform_dynamic_branch(dynamic_part, disabled_prop_expr)?;
+                    dynamic_exprs.push(dyn_expr);
                 }
 
                 let mut static_classes = Vec::new();
