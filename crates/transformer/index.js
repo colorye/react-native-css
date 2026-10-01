@@ -1,4 +1,4 @@
-const { existsSync, readFileSync } = require("fs");
+const { existsSync, readFileSync, readdirSync } = require("fs");
 const { join } = require("path");
 
 const { platform, arch } = process;
@@ -74,7 +74,8 @@ function getCandidateFilenames() {
 }
 
 // 2. Load the first matching candidate file from inside this package
-for (const file of getCandidateFilenames()) {
+const candidates = getCandidateFilenames();
+for (const file of candidates) {
   const fullPath = join(__dirname, file);
   if (existsSync(fullPath)) {
     try {
@@ -87,16 +88,15 @@ for (const file of getCandidateFilenames()) {
 }
 
 if (!nativeBinding) {
-  // If no candidate succeeded, try direct require of fallback
-  try {
-    nativeBinding = require("./transformer.node");
-  } catch (e) {
-    const errorMsg =
-      `Failed to load native binding for @colorye/react-native-css on ${platform}-${arch}.\n` +
-      `Ensure that transformer.node or transformer.${platform}-${arch}.node exists in ${__dirname}.\n` +
-      (loadError ? `Original error: ${loadError.message}` : "");
-    throw new Error(errorMsg);
-  }
+  const present = readdirSync(__dirname).filter((f) => f.endsWith(".node"));
+  const errorMsg =
+    `[@colorye/react-native-css] Failed to load the native binding on ${platform}-${arch}.\n` +
+    `Tried: ${candidates.join(", ")}\n` +
+    `Prebuilt binaries found in ${__dirname}: ${present.length ? present.join(", ") : "none"}\n` +
+    `Prebuilt binaries are published for: darwin-arm64, darwin-x64, linux-x64-gnu, win32-x64-msvc.\n` +
+    `On other platforms, build from source with \`yarn build:native\` (requires a Rust toolchain).\n` +
+    (loadError ? `Original error: ${loadError.message}` : "");
+  throw new Error(errorMsg);
 }
 
 module.exports = {

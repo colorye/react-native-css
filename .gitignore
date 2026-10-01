@@ -21,4 +21,3 @@ src/exported-stylesheet.json
 target/
 **/target/
 crates/transformer/*.node
-!crates/transformer/transformer.node

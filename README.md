@@ -18,7 +18,7 @@ Modern React Native apps need the ergonomics of Tailwind CSS v4 and standard CSS
 - 🎬 **Transition & Animation**: Support for `duration-`, `ease-`, and `delay-` utility mappings.
 - 🌳 **Group States & Text Inheritance**: Native coordination for `group` / `group-active:` and CSS text style inheritance (`color`, `fontSize`, `fontWeight`, etc.).
 - 🔄 **Component Interoperability**: First-class `cssInterop` and `remapProps` for third-party libraries (`FlashList`, `TrueSheet`, etc.).
-- 🌍 **Multi-platform N-API Prebuilds**: Zero-setup binaries across macOS (Apple Silicon & Intel), Linux (GNU & musl, x64 & arm64), and Windows (x64 & arm64).
+- 🌍 **Multi-platform N-API Prebuilds**: Zero-setup binaries for macOS (Apple Silicon & Intel), Linux (x64, glibc), and Windows (x64). Other platforms (Linux arm64 / musl, Windows arm64) can build from source with `yarn build:native` (requires a Rust toolchain) — prebuilds are on the [v1.0 roadmap](https://github.com/colorye/react-native-css/issues/2).
 
 ---
 
@@ -189,6 +189,12 @@ yarn build:js
 
 # Run full build
 yarn build
+
+# Run tests (Rust unit tests + native binding smoke test; requires `yarn build:native`)
+yarn test
+
+# Format & lint the Rust crate
+yarn check
 ```
 
 ---
